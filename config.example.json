@@ -1,0 +1,27 @@
+{
+  "machine": "m1",
+  "name": "M1",
+  "color": "#9b7bff",
+  "peers": [
+    { "id": "m2", "name": "M2", "url": "http://127.0.0.1:18899", "color": "#2ee6d2" },
+    { "id": "pc", "name": "PC", "url": "http://127.0.0.1:18898", "color": "#ffb547" }
+  ],
+  "warm": ["Claude Code"],
+  "launchers": [
+    { "label": "Claude Code", "group": "main", "cwd": "~", "mode": "default" },
+    { "label": "Website", "group": "cloud", "cwd": "~/code/website", "mode": "acceptEdits" },
+    { "label": "API service", "group": "cloud", "cwd": "~/code/api", "mode": "default" },
+    { "label": "Gemma (llama.cpp)", "group": "local", "kind": "pipe", "cmd": "~/models/gemma-chat.sh", "cwd": "~/models",
+      "note": "a script that reads a line on stdin and prints › when ready" },
+    { "label": "Qwen (OpenAI-style server)", "group": "local", "kind": "api", "url": "http://127.0.0.1:8080",
+      "serve": { "cmd": "/opt/homebrew/bin/llama-server", "args": ["-m", "/path/to/model.gguf", "--port", "8080"] },
+      "system": "You are a concise, helpful assistant.", "note": "started on first message, stopped after 30 idle minutes" },
+    { "label": "Ollama", "group": "local", "kind": "api", "url": "http://127.0.0.1:11434", "health": "/", "model": "llama3.2", "note": "talks to an Ollama server that is already running" },
+    { "label": "Activity Monitor", "group": "tasks", "kind": "open", "path": "/System/Applications/Utilities/Activity Monitor.app" }
+  ],
+  "stt": { "python": "/usr/bin/python3", "model": "mlx-community/whisper-large-v3-turbo" },
+  "tts": { "url": "http://127.0.0.1:7864/tts", "voice": "af_heart", "speed": 1.0 },
+  "dictate": {},
+  "remoteOrigins": [],
+  "oneWindowTerminals": []
+}

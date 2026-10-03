@@ -1,0 +1,8 @@
+config.json
+state.json
+*.log
+dictate.out
+node_modules/
+.DS_Store
+mac/micon
+mac/dictate

@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moonstone · voice control for your Claude Code sessions</title>
+<meta name="description" content="A self-hosted, local-first control panel for Claude Code. Every session on every machine in one window, with push-to-talk, spoken answers and local models.">
+<meta property="og:title" content="Moonstone">
+<meta property="og:description" content="Every Claude Code session on every machine in one window. Talk to it, it talks back.">
+<meta property="og:image" content="https://nicedreamzapp.github.io/moonstone/img/hero.png">
+<link rel="icon" href="img/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  --bg0:#03040b; --fg:#eef0fb; --dim:#9aa1c4; --faint:#5d6489;
+  --glass:rgba(10,12,28,.62); --rim:rgba(255,255,255,.12); --rim2:rgba(255,255,255,.06);
+  --c1:#9b7bff; --c2:#2ee6d2; --c3:#ffb547; --ok:#3ee08f; --need:#ffab3d;
+  --sans:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg0);color:var(--fg);font:15px/1.6 var(--sans);overflow-x:hidden}
+a{color:#c9bcff;text-decoration:none}
+a:hover{color:#fff}
+img{max-width:100%;display:block}
+
+.aurora{position:fixed;inset:-25%;z-index:0;pointer-events:none;filter:blur(80px) saturate(1.3) brightness(.42)}
+.aurora i{position:absolute;border-radius:50%;opacity:.8;mix-blend-mode:screen}
+.aurora i:nth-child(1){width:55%;height:50%;left:5%;top:5%;background:#6a3cff;animation:a1 22s ease-in-out infinite alternate}
+.aurora i:nth-child(2){width:50%;height:45%;right:0;top:20%;background:#1aa8ff;animation:a2 26s ease-in-out infinite alternate}
+.aurora i:nth-child(3){width:55%;height:45%;left:10%;bottom:5%;background:#d0389f;animation:a3 30s ease-in-out infinite alternate}
+.aurora i:nth-child(4){width:45%;height:40%;right:5%;bottom:0;background:#19d3c5;animation:a4 24s ease-in-out infinite alternate}
+@keyframes a1{to{transform:translate(30%,35%) scale(1.2)}}
+@keyframes a2{to{transform:translate(-40%,30%) scale(.85)}}
+@keyframes a3{to{transform:translate(25%,-45%) scale(1.15)}}
+@keyframes a4{to{transform:translate(-35%,-40%) scale(1.25)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:0 28px}
+.glass{background:var(--glass);border:1px solid var(--rim);border-radius:20px;backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 10px 30px rgba(0,0,0,.25)}
+
+nav{display:flex;align-items:center;gap:14px;padding:22px 0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:18px;letter-spacing:.02em;
+  background:linear-gradient(90deg,#d9ccff,#9fe8ff 60%,#ffc2e6);-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand img{width:30px;height:30px}
+nav .sp{flex:1}
+nav a.pill{font-size:13px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;border:1px solid var(--rim);background:rgba(255,255,255,.04);color:var(--dim);font-size:13px;white-space:nowrap}
+.pill:hover{color:var(--fg);background:rgba(255,255,255,.09)}
+.pill.primary{color:#fff;font-weight:600;border-color:transparent;background:linear-gradient(135deg,#8b6bff,#c2629f);box-shadow:0 0 22px rgba(155,123,255,.45)}
+.pill.primary:hover{box-shadow:0 0 30px rgba(155,123,255,.7)}
+
+.hero{text-align:center;padding:48px 0 30px}
+.hero .icon{width:112px;height:112px;margin:0 auto 18px;filter:drop-shadow(0 0 28px rgba(150,120,255,.55))}
+h1{margin:0;font-size:clamp(40px,7vw,72px);line-height:1.05;font-weight:700;letter-spacing:-.01em;
+  background:linear-gradient(90deg,#e6dcff,#a8ecff 55%,#ffc9ea);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lede{max-width:640px;margin:18px auto 0;color:var(--dim);font-size:clamp(16px,2.2vw,19px)}
+.cta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+.cta .pill{padding:10px 20px;font-size:14px}
+.tags{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+.tag{font-size:11.5px;letter-spacing:.04em;padding:3px 11px;border-radius:999px;color:var(--dim);background:rgba(255,255,255,.05);border:1px solid var(--rim2)}
+
+.shot{margin:34px auto 0;padding:10px;border-radius:26px}
+.shot img{border-radius:18px;width:100%}
+
+section{padding:64px 0 0}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--c1)}
+h2{margin:6px 0 10px;font-size:clamp(26px,3.6vw,36px);line-height:1.15;font-weight:600}
+.sub{color:var(--dim);max-width:680px;margin:0 0 26px}
+
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.card{padding:20px 20px 18px;position:relative;overflow:hidden}
+.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c);box-shadow:0 0 16px var(--c)}
+.card h3{margin:0 0 6px;font-size:15px;font-weight:600;color:color-mix(in srgb,var(--c) 55%,white)}
+.card p{margin:0;color:var(--dim);font-size:13.5px}
+.card code,.k code,p code,li code{font-family:var(--mono);font-size:12px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:5px;color:#dcd6ff}
+
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;align-items:center}
+.split.rev .media{order:-1}
+.split ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px}
+.split li{padding-left:22px;position:relative;color:var(--dim)}
+.split li::before{content:"";position:absolute;left:2px;top:9px;width:8px;height:8px;border-radius:50%;background:var(--c,var(--c1));box-shadow:0 0 10px var(--c,var(--c1))}
+.split li b{color:var(--fg);font-weight:600}
+.media{padding:8px;border-radius:22px}
+.media img{border-radius:15px}
+.media.narrow{max-width:420px;justify-self:center}
+
+/* architecture */
+.arch{padding:26px;display:grid;grid-template-columns:auto 1fr;gap:18px 26px;align-items:center}
+.node{padding:12px 14px;border-radius:14px;border:1px solid var(--rim);background:rgba(255,255,255,.04);font-size:13px}
+.node b{display:block;font-weight:600}
+.node small{color:var(--dim);font-family:var(--mono);font-size:11.5px}
+.node.main{border-color:color-mix(in srgb,var(--c1) 60%,transparent);background:color-mix(in srgb,var(--c1) 14%,transparent);box-shadow:0 0 22px rgba(155,123,255,.25)}
+.flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.arrow{color:var(--faint);font-family:var(--mono);font-size:13px;white-space:nowrap}
+.col{display:flex;flex-direction:column;gap:8px}
+.peers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.lbl{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);font-weight:600}
+
+/* quick start */
+pre{margin:0;font-family:var(--mono);font-size:13px;line-height:1.7;overflow-x:auto;padding:18px 20px;color:#dcd6ff}
+pre .c{color:var(--faint)}
+.qs{padding:6px}
+.qs pre{border-radius:14px;background:rgba(0,0,0,.35)}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.k{padding:16px 18px;font-size:13.5px;color:var(--dim)}
+.k b{color:var(--fg);display:block;margin-bottom:4px}
+
+.sec{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+
+footer{padding:70px 0 44px;text-align:center;color:var(--faint);font-size:13px}
+footer .cta{margin:0 0 18px}
+
+@media (max-width:1100px){ .grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:820px){
+  .split{grid-template-columns:minmax(0,1fr)} .split.rev .media{order:0}
+  .steps,.sec{grid-template-columns:minmax(0,1fr)}
+  .arch{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:600px){
+  .wrap{padding:0 16px}
+  .grid{grid-template-columns:minmax(0,1fr)}
+  nav .hide-sm{display:none}
+  .hero{padding-top:26px}
+  .peers{grid-template-columns:minmax(0,1fr)}
+  section{padding-top:48px}
+}
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i><i></i></div>
+<div class="wrap">
+
+<nav>
+  <a class="brand" href="#"><img src="img/icon-256.png" alt="">Moonstone</a>
+  <span class="sp"></span>
+  <a class="pill hide-sm" href="#features">Features</a>
+  <a class="pill hide-sm" href="#start">Quick start</a>
+  <a class="pill primary" href="https://github.com/nicedreamzapp/moonstone">GitHub</a>
+</nav>
+
+<header class="hero">
+  <img class="icon" src="img/icon-256.png" alt="Moonstone icon">
+  <h1>Moonstone</h1>
+  <p class="lede">Every Claude Code session on every machine you own, in one browser window. Approve steps, send the next instruction by voice, and hear the answer back. Local models sit right next to Claude.</p>
+  <div class="cta">
+    <a class="pill primary" href="https://github.com/nicedreamzapp/moonstone">View on GitHub</a>
+    <a class="pill" href="#start">Quick start</a>
+  </div>
+  <div class="tags"><span class="tag">MIT</span><span class="tag">macOS + Windows</span><span class="tag">Node, zero dependencies</span><span class="tag">127.0.0.1 only</span></div>
+  <div class="glass shot"><img src="img/hero-panels.png" alt="Moonstone session list across three machines next to an open conversation"></div>
+</header>
+
+<section id="features">
+  <div class="eyebrow">What it does</div>
+  <h2>A control panel for a fleet of agents</h2>
+  <p class="sub">One Node file and one HTML file. It reads Claude Code's own transcripts, runs sessions as headless <code>claude -p</code> processes, and links machines over SSH tunnels you already trust.</p>
+  <div class="grid">
+    <div class="glass card" style="--c:var(--c1)"><h3>Every machine, one list</h3><p>Sessions grouped by machine with GPU and RAM gauges, sorted so the ones waiting on you come first.</p></div>
+    <div class="glass card" style="--c:var(--need)"><h3>Real permission prompts</h3><p>Runs with <code>--permission-prompt-tool stdio</code>. Allow or deny each step from the window; nothing is auto-approved.</p></div>
+    <div class="glass card" style="--c:var(--ok)"><h3>Push to talk</h3><p>Drives your OS's own dictation, falls back to browser speech or local Whisper. Enter while listening stops and sends.</p></div>
+    <div class="glass card" style="--c:var(--c2)"><h3>Answers read aloud</h3><p>Finished answers go to a local Kokoro voice. With windows open on several machines, only the last one you touched speaks.</p></div>
+    <div class="glass card" style="--c:#5aa2ff"><h3>Local models too</h3><p>llama.cpp or MLX chat scripts over stdin, or OpenAI-style servers it starts on demand and stops after 30 idle minutes.</p></div>
+    <div class="glass card" style="--c:#ff6fae"><h3>Picks the best machine</h3><p>A launcher on several machines goes to the least busy one: fewest working sessions, then lowest GPU.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="split">
+    <div style="--c:var(--c1)">
+      <div class="eyebrow">Sessions</div>
+      <h2>Terminal or dock, it is the same conversation</h2>
+      <ul>
+        <li><b>Dock sessions</b> are headless Claude Code processes Moonstone owns, so it can type into them and answer their prompts.</li>
+        <li><b>Terminal sessions</b> already running show up too. Type into one and Moonstone stops the terminal copy and resumes it here with full history.</li>
+        <li><b>Warm spares</b> keep a <code>claude</code> process ready per launcher, so a new session starts without the wait.</li>
+        <li><b>Machine chips</b> pin a launcher to the Mac or PC you want; the star marks the suggestion.</li>
+      </ul>
+    </div>
+    <div class="glass media narrow"><img src="img/sessions.png" alt="Session list with three machines"></div>
+  </div>
+</section>
+
+<section>
+  <div class="split rev">
+    <div style="--c:var(--need)">
+      <div class="eyebrow">Approvals</div>
+      <h2>Say yes from anywhere in the house</h2>
+      <ul>
+        <li>Permission prompts become an <b>Allow / Don't</b> card with the exact command.</li>
+        <li>Questions Claude asks with options turn into <b>buttons</b>.</li>
+        <li>The tool calls behind every answer fold under a <b>Show the work</b> bar with step count and time.</li>
+      </ul>
+    </div>
+    <div class="glass media"><img src="img/permission.png" alt="A session waiting for permission to run a command"></div>
+  </div>
+</section>
+
+<section>
+  <div class="split">
+    <div style="--c:var(--ok)">
+      <div class="eyebrow">Voice</div>
+      <h2>Talk to it. It talks back.</h2>
+      <ul>
+        <li><b>macOS:</b> a small signed Swift helper clicks Edit &gt; Start Dictation in the focused app and checks through CoreAudio that the mic really turned on or off.</li>
+        <li><b>Windows:</b> presses Win+H for voice typing.</li>
+        <li><b>Fallbacks:</b> browser speech recognition, then local Whisper (<code>mlx_whisper</code>, large-v3-turbo) on your own machine.</li>
+        <li><b>Narration:</b> tap the speaker and new answers are read aloud by a local Kokoro server.</li>
+      </ul>
+    </div>
+    <div class="glass media"><img src="img/conversation.png" alt="Conversation with narration on and the mic listening"></div>
+  </div>
+</section>
+
+<section id="arch">
+  <div class="eyebrow">Architecture</div>
+  <h2>Your browser, your machines, nothing in between</h2>
+  <p class="sub">Every machine runs the same server on 127.0.0.1:8899. The one you open polls its peers through SSH tunnels and forwards requests for their sessions.</p>
+  <div class="glass arch">
+    <div class="lbl">You</div>
+    <div class="flow"><div class="node"><b>Browser</b><small>public/index.html</small></div><span class="arrow">HTTP + SSE →</span><div class="node main"><b>Moonstone server</b><small>server.js · 127.0.0.1:8899</small></div></div>
+    <div class="lbl">Runs</div>
+    <div class="flow"><div class="node"><b>claude -p</b><small>stream-json in / out</small></div><div class="node"><b>Local models</b><small>pipe scripts · llama-server · Ollama</small></div><div class="node"><b>Voice</b><small>mlx_whisper · Kokoro · dictation helper</small></div></div>
+    <div class="lbl">Peers</div>
+    <div class="peers"><div class="node" style="border-color:rgba(46,230,210,.45)"><b>Second Mac</b><small>ssh -R 18899:127.0.0.1:8899</small></div><div class="node" style="border-color:rgba(255,181,71,.45)"><b>Windows PC</b><small>ssh -R 18898:127.0.0.1:8899</small></div></div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="eyebrow">Quick start</div>
+  <h2>Running in a minute</h2>
+  <p class="sub">Needs Node 18+ and Claude Code. No install step.</p>
+  <div class="glass qs"><pre><span class="c"># get it</span>
+git clone https://github.com/nicedreamzapp/moonstone.git
+cd moonstone
+cp config.example.json config.json
+
+<span class="c"># run it, then open http://localhost:8899</span>
+node server.js
+
+<span class="c"># or look around with invented data on :8890</span>
+node tools/demo-server.js</pre></div>
+  <div class="steps">
+    <div class="glass k"><b>Add launchers</b>List your projects, local models and servers in <code>config.json</code>.</div>
+    <div class="glass k"><b>Link machines</b>Run it on each machine and add each one as a peer through an SSH tunnel.</div>
+    <div class="glass k"><b>Turn on voice</b>Build the Mac helper with <code>mac/build.sh</code> and allow it under Accessibility.</div>
+  </div>
+</section>
+
+<section id="security">
+  <div class="eyebrow">Security</div>
+  <h2>Boring on purpose</h2>
+  <div class="sec">
+    <div class="glass k"><b>Loopback only</b>Listens on 127.0.0.1. Other machines come in through SSH tunnels, never an open port.</div>
+    <div class="glass k"><b>Host check</b>Requests not addressed to localhost get a 403, which stops DNS rebinding.</div>
+    <div class="glass k"><b>CSRF guard</b>Every POST needs an <code>X-Dock</code> header, which a cross-site page can't send without a preflight Moonstone never grants.</div>
+    <div class="glass k"><b>Audio stays home</b>Transcription and speech run on your machines. Temporary recordings are deleted right after.</div>
+  </div>
+</section>
+
+<footer>
+  <div class="cta"><a class="pill primary" href="https://github.com/nicedreamzapp/moonstone">Get Moonstone on GitHub</a></div>
+  MIT licensed · Built with Claude Code
+</footer>
+
+</div>
+</body>
+</html>

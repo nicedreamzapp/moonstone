@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moonstone</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Liquid glass on a slow aurora. Each machine gets its own accent: violet, teal, amber by default. */
+:root{
+  color-scheme:dark;
+  --bg0:#03040b; --fg:#eef0fb; --dim:#9aa1c4; --faint:#5d6489;
+  --glass:rgba(10,12,28,.62); --glass2:rgba(16,19,40,.7); --rim:rgba(255,255,255,.12); --rim2:rgba(255,255,255,.06);
+  --c1:#9b7bff; --c2:#2ee6d2; --c3:#ffb547;
+  --ok:#3ee08f; --need:#ffab3d; --err:#ff5f7a;
+  --sans:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg0);color:var(--fg);font:13px/1.45 var(--sans);overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid #c9bcff;outline-offset:2px;border-radius:8px}
+
+/* aurora: eight color blobs, each drifting on its own loop, plus a slow hue swing */
+.aurora{position:fixed;inset:-25%;z-index:0;pointer-events:none;filter:blur(70px) saturate(1.4) brightness(.5);animation:hue 30s ease-in-out infinite alternate}
+.aurora i{position:absolute;border-radius:50%;opacity:.8;mix-blend-mode:screen}
+.aurora i:nth-child(1){width:55%;height:50%;left:5%;top:5%;background:#6a3cff;animation:a1 18s ease-in-out infinite alternate}
+.aurora i:nth-child(2){width:50%;height:45%;right:0;top:20%;background:#1aa8ff;animation:a2 22s ease-in-out infinite alternate}
+.aurora i:nth-child(3){width:55%;height:45%;left:10%;bottom:5%;background:#d0389f;animation:a3 26s ease-in-out infinite alternate}
+.aurora i:nth-child(4){width:45%;height:40%;right:5%;bottom:0;background:#19d3c5;animation:a4 20s ease-in-out infinite alternate}
+.aurora i:nth-child(5){width:70%;height:60%;left:15%;top:25%;background:#1b1f78;opacity:.9;animation:a5 34s ease-in-out infinite alternate}
+.aurora i:nth-child(6){width:30%;height:28%;left:55%;top:55%;background:#ff7a8a;opacity:.55;animation:a6 24s ease-in-out infinite alternate}
+.aurora i:nth-child(7){width:32%;height:30%;left:0;top:45%;background:#3fe08a;opacity:.45;animation:a7 28s ease-in-out infinite alternate}
+.aurora i:nth-child(8){width:26%;height:24%;right:15%;top:0;background:#ffc46b;opacity:.4;animation:a8 21s ease-in-out infinite alternate}
+@keyframes a6{to{transform:translate(-60%,-70%) scale(1.4)}}
+@keyframes a7{to{transform:translate(90%,-30%) scale(1.2)}}
+@keyframes a8{to{transform:translate(-80%,120%) scale(1.3)}}
+@keyframes a1{to{transform:translate(35%,40%) scale(1.25)}}
+@keyframes a2{to{transform:translate(-45%,35%) scale(.85)}}
+@keyframes a3{to{transform:translate(30%,-50%) scale(1.2)}}
+@keyframes a4{to{transform:translate(-40%,-45%) scale(1.3)}}
+@keyframes a5{to{transform:translate(-15%,10%) rotate(40deg) scale(1.1)}}
+@keyframes hue{to{filter:blur(70px) saturate(1.4) brightness(.5) hue-rotate(-35deg)}}
+
+.app{position:relative;z-index:1;height:calc(100dvh / 1.2);zoom:1.2;display:flex;flex-direction:column;padding:10px;gap:10px}
+.glass{background:var(--glass);border:1px solid var(--rim);border-radius:18px;backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 10px 30px rgba(0,0,0,.25)}
+
+/* brand */
+.brand{display:flex;align-items:center;gap:10px;padding:4px 6px 0;font-size:19px;font-weight:600;letter-spacing:.03em;
+  background:linear-gradient(90deg,#d9ccff,#9fe8ff 60%,#ffc2e6);-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand .orb{width:20px;height:20px;border-radius:50%;flex:none;background:radial-gradient(circle at 35% 30%,#fff 0 8%,#c9d6ff 22%,#7c6bff 58%,#2a2560 100%);box-shadow:0 0 14px #8f7bff}
+
+/* list view */
+.list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;min-height:0;scrollbar-width:thin}
+.machine{position:relative;padding:10px 10px 8px 14px;overflow:hidden;flex-shrink:0}
+.machine::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);box-shadow:0 0 18px var(--c)}
+.machine::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,color-mix(in srgb,var(--c) 16%,transparent),transparent 55%);pointer-events:none}
+.machine.off{opacity:.6}
+.m-head{position:relative;z-index:1;display:flex;align-items:center;gap:10px;padding:2px 4px 8px}
+.m-name{font-size:17px;font-weight:600;color:var(--c);letter-spacing:.02em}
+.m-note{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.gpu{margin-left:auto;display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+.segs{display:flex;gap:3px}
+.stats{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.stats .gpu{margin-left:0}
+.bar{width:54px;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;display:inline-block}
+.bar i{display:block;height:100%;border-radius:3px}
+.segs i{width:9px;height:9px;border-radius:3px;background:rgba(255,255,255,.08);border:1px solid var(--rim2)}
+.segs i.on{background:var(--c);box-shadow:0 0 8px var(--c);border-color:transparent}
+.cards{position:relative;z-index:1;display:flex;flex-direction:column}
+.card{display:grid;grid-template-columns:20px minmax(0,1fr) auto;align-items:center;column-gap:10px;padding:8px 6px;border-top:1px solid var(--rim2);text-align:left;width:100%;border-radius:10px}
+.card:first-child{border-top:0}
+.card:hover{background:rgba(255,255,255,.05)}
+.card{position:relative}
+.end{position:absolute;right:4px;top:4px;display:none;padding:1px 8px;border-radius:999px;font-size:13px;color:var(--dim);background:rgba(0,0,0,.45);border:1px solid var(--rim)}
+.card:hover .end,.end.armed{display:inline-block}
+@media (hover:none){.end{display:inline-block}}
+.end:hover{color:#ffc2cc;border-color:rgba(255,95,122,.5)}
+.end.armed{color:#fff;background:rgba(255,95,122,.4);border-color:var(--err);font-size:11.5px;font-weight:600}
+.c-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-name small{color:var(--dim);font-weight:400;margin-left:6px}
+.c-last{grid-column:2/4;color:var(--faint);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{font-size:11.5px;color:var(--dim);white-space:nowrap}
+.dot{width:12px;height:12px;border-radius:50%;justify-self:center}
+.s-cooking .dot{background:var(--ok);box-shadow:0 0 10px var(--ok);animation:beat 1.6s ease-in-out infinite}
+.s-idle .dot{background:radial-gradient(circle at 35% 30%,#8f96c0,#3a3f66)}
+.s-answered .dot{background:#4aa8ff;box-shadow:0 0 10px #4aa8ff}
+.s-error .dot{background:var(--err);box-shadow:0 0 10px var(--err)}
+.s-needs .dot{background:var(--need);box-shadow:0 0 0 3px rgba(255,171,61,.25),0 0 14px var(--need)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.04em;white-space:nowrap}
+.badge.need{color:#ffd28c;background:rgba(255,171,61,.16);border:1px solid rgba(255,171,61,.55);box-shadow:0 0 16px rgba(255,171,61,.35);animation:glow 1.6s ease-in-out infinite}
+.badge.need::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--need)}
+.badge.ans{color:#bfe0ff;background:rgba(74,168,255,.14);border:1px solid rgba(74,168,255,.45)}
+.badge.err{color:#ffc2cc;background:rgba(255,95,122,.14);border:1px solid rgba(255,95,122,.45)}
+@keyframes glow{50%{box-shadow:0 0 26px rgba(255,171,61,.6)}}
+@keyframes beat{50%{opacity:.55}}
+.empty{color:var(--faint);font-size:12px;padding:6px 6px 4px}
+
+.launch{padding:10px;display:flex;flex-direction:column;gap:8px;flex-shrink:0;max-height:55%;overflow-y:auto}
+.li{display:flex;flex-direction:column;gap:6px}
+.lb{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;text-align:left;padding:8px 12px;border-radius:12px;
+  background:color-mix(in srgb,var(--c) 16%,transparent);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);color:color-mix(in srgb,var(--c) 70%,white)}
+.lb:hover{background:color-mix(in srgb,var(--c) 28%,transparent);box-shadow:0 0 16px color-mix(in srgb,var(--c) 35%,transparent)}
+.ln{font-weight:600}
+.lb small{flex-basis:100%;color:var(--dim);font-size:11px}
+.on{font-size:11.5px;color:var(--m);font-weight:600}
+.li.main .lb{padding:11px 14px;font-size:15px;box-shadow:0 0 22px color-mix(in srgb,var(--c) 35%,transparent)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding-left:4px}
+.chip{padding:3px 11px;border-radius:999px;font-size:11.5px;font-weight:600;color:color-mix(in srgb,var(--c) 80%,white);border:1px solid color-mix(in srgb,var(--c) 40%,transparent);background:rgba(255,255,255,.03)}
+.chip.best{background:color-mix(in srgb,var(--c) 30%,transparent);border-color:var(--c);box-shadow:0 0 14px color-mix(in srgb,var(--c) 60%,transparent)}
+.chip.best::after{content:" ★";font-size:10px}
+.grp{border-top:1px solid var(--rim2);padding-top:6px}
+.grp>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:600;color:var(--dim);padding:4px 4px;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase}
+.grp>summary::-webkit-details-marker{display:none}
+.grp>summary::before{content:"›";transition:transform .15s}
+.grp[open]>summary::before{transform:rotate(90deg)}
+.grp>summary:hover{color:var(--fg)}
+.cnt{font-size:10.5px;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.07);color:var(--dim)}
+.items{display:flex;flex-direction:column;gap:6px;padding:6px 0 4px}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9;padding:8px 14px;border-radius:999px;background:#1b1f37;border:1px solid var(--rim);font-size:12.5px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+
+/* conversation view */
+.convo{flex:1;display:flex;flex-direction:column;min-height:0;gap:10px}
+.c-top{display:flex;align-items:center;gap:8px;padding:8px 10px}
+.mpill{padding:3px 10px;border-radius:999px;font-weight:600;font-size:12px;color:#fff;background:color-mix(in srgb,var(--c) 55%,transparent);box-shadow:0 0 14px color-mix(in srgb,var(--c) 50%,transparent)}
+.c-title{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500}
+.c-title small{color:var(--dim);font-weight:400;margin-left:6px}
+.ghost{padding:5px 11px;border-radius:999px;border:1px solid var(--rim);font-size:12px;color:var(--dim);background:rgba(255,255,255,.03);white-space:nowrap}
+.ghost:hover{color:var(--fg);background:rgba(255,255,255,.08)}
+.msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:14px;min-height:0;border-top:2px solid color-mix(in srgb,var(--c) 70%,transparent)}
+.u{align-self:flex-end;max-width:88%;padding:8px 12px;border-radius:14px 14px 4px 14px;background:color-mix(in srgb,var(--c) 30%,rgba(30,34,70,.6));border:1px solid color-mix(in srgb,var(--c) 40%,transparent);white-space:pre-wrap;overflow-wrap:anywhere}
+.a{overflow-wrap:anywhere;line-height:1.55}
+.a p{margin:0 0 8px}.a p:last-child{margin:0}
+.a ul,.a ol{margin:0 0 8px;padding-left:20px}
+.a code{font-family:var(--mono);font-size:12px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:5px}
+.a pre{font-family:var(--mono);font-size:11.5px;background:rgba(0,0,0,.35);border:1px solid var(--rim2);border-radius:10px;padding:10px;overflow-x:auto;white-space:pre}
+.a pre code{background:none;padding:0}
+.a a{color:#9fd0ff}
+.a h1,.a h2,.a h3{font-size:14px;margin:4px 0 6px}
+.work{margin-top:8px}
+.work>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:7px;padding:3px 11px;border-radius:999px;border:1px solid var(--rim);color:var(--dim);font-size:11.5px;background:rgba(255,255,255,.03)}
+.work>summary::-webkit-details-marker{display:none}
+.work>summary::before{content:"›";transition:transform .15s}
+.work[open]>summary::before{transform:rotate(90deg)}
+.work>summary:hover{color:var(--fg)}
+.steps{margin-top:8px;display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:12px;background:rgba(5,7,20,.55);border:1px solid var(--rim2)}
+.step{font-family:var(--mono);font-size:11.5px;color:#c9cdf0;white-space:pre-wrap;overflow-wrap:anywhere}
+.step.t{font-family:var(--sans);font-size:12px;color:var(--dim)}
+.step details summary{cursor:pointer;list-style:none}
+.step details summary::-webkit-details-marker{display:none}
+.step details summary::after{content:"  · output";color:var(--faint);font-family:var(--sans);font-size:10.5px}
+.step details[open] summary::after{content:""}
+.step .out{margin:4px 0 4px 12px;color:#8f95bd;max-height:260px;overflow:auto;white-space:pre-wrap}
+.step.bad{color:#ff9fb0}
+.live{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px}
+.live .dot{width:9px;height:9px;background:var(--ok);box-shadow:0 0 10px var(--ok);animation:beat 1.2s infinite}
+.live-line{font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ask{padding:12px;border-radius:14px;background:rgba(255,171,61,.1);border:1px solid rgba(255,171,61,.5);box-shadow:0 0 22px rgba(255,171,61,.2);display:flex;flex-direction:column;gap:8px}
+.ask b{color:#ffd28c}
+.ask .cmd{font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;overflow-wrap:anywhere;background:rgba(0,0,0,.3);padding:8px;border-radius:8px;max-height:200px;overflow:auto}
+.ask .row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{padding:6px 14px;border-radius:999px;font-weight:600;font-size:12px;border:1px solid var(--rim)}
+.btn.yes{background:rgba(62,224,143,.2);border-color:rgba(62,224,143,.6);color:#b9f5d6}
+.btn.no{background:rgba(255,95,122,.14);border-color:rgba(255,95,122,.5);color:#ffc2cc}
+.btn.opt{background:rgba(255,255,255,.06)}
+.note{padding:10px 12px;border-radius:12px;font-size:12px;color:var(--dim);background:rgba(255,255,255,.04);border:1px solid var(--rim2);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.note.err{color:#ffc2cc;border-color:rgba(255,95,122,.4)}
+.compose{display:flex;gap:6px;padding:8px;align-items:center}
+.compose textarea{flex:1;min-width:0;resize:none;max-height:180px;background:rgba(0,0,0,.25);border:1px solid var(--rim);border-radius:14px;padding:9px 12px;color:var(--fg);font:inherit;outline:none}
+.compose textarea:focus{border-color:color-mix(in srgb,var(--c) 70%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 20%,transparent)}
+.send{height:38px;padding:0 16px;border-radius:14px;font-weight:600;background:linear-gradient(135deg,color-mix(in srgb,var(--c) 80%,white 0%),color-mix(in srgb,var(--c) 55%,#ff6fae));color:#fff;box-shadow:0 0 18px color-mix(in srgb,var(--c) 45%,transparent)}
+.send[disabled]{opacity:.4;cursor:default}
+
+/* push to talk — lives in every conversation's message box. Tap: mic goes green and your words type into the box
+   as you talk; tap again and it sends. Its state lives in micUi, so a re-render mid-recording redraws it as it was. */
+.micb{width:28px;height:28px;flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;touch-action:none;
+  background:rgba(255,255,255,.05);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);color:color-mix(in srgb,var(--c) 60%,white);transition:transform .12s,background .2s}
+.micb:hover{transform:scale(1.07);background:color-mix(in srgb,var(--c) 22%,transparent)}
+.micb svg{width:14px;height:14px}
+.micb.narr{margin-left:auto}
+.micb.narr.on{color:#0b1a12;background:#3ee08f;border-color:#3ee08f}
+.micb.live{color:#0b1a12;background:#3ee08f;border-color:#3ee08f}
+.micb.busy{color:#fff;background:#ff5f7a;border-color:#ff5f7a}
+@keyframes micpulse{0%{box-shadow:0 0 0 0 rgba(62,224,143,.55)}70%{box-shadow:0 0 0 13px rgba(62,224,143,0)}100%{box-shadow:0 0 0 0 rgba(62,224,143,0)}}
+@keyframes micbreathe{to{opacity:.6}}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<div class="app" id="app"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = t => String(t ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+// machine id -> accent color and display name, filled from /api/state ("color" in config.json wins)
+const PALETTE = ["var(--c1)","var(--c2)","var(--c3)","#5aa2ff","#ff6fae"];
+let MACH = {};
+const MC = new Proxy({}, {get:(_,id)=>MACH[id]?.color || "var(--c1)"});
+const MN = new Proxy({}, {get:(_,id)=>MACH[id]?.name || String(id)});
+function learnMachines(st){ (st?.machines||[]).forEach((m,i)=>{ MACH[m.id] = {name:m.name, color:m.color || PALETTE[i % PALETTE.length]}; }); }
+let picking = null;
+let armed = null;  // first tap on × arms it, second tap ends the session // launcher label waiting for a machine choice
+let S = null, openId = null, D = null;
+const BASE = location.pathname.replace(/[^/]*$/, "");
+const openWork = new Set();          // which "show the work" panels are open, kept across refreshes
+const drafts = (()=>{ try { return JSON.parse(sessionStorage.getItem("moonstone.drafts")||"{}"); } catch { return {}; } })();
+const saveDrafts = () => { try { sessionStorage.setItem("moonstone.drafts", JSON.stringify(drafts)); } catch {} };
+addEventListener("pagehide", saveDrafts);
+const pendingSent = {};              // chat id -> messages you sent that the server hasn't shown back yet
+const mdCache = new Map();
+
+async function api(path, body){
+  path = BASE + path.replace(/^\//, "");   // relative, so it also works when served under a sub-path
+  const r = await fetch(path, body ? {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:JSON.stringify(body)} : {cache:"no-store"});
+  return r.json();
+}
+function ago(ms){ const s=(Date.now()-ms)/1000; if(s<60) return "just now"; if(s<3600) return Math.round(s/60)+"m ago"; return Math.round(s/3600)+"h ago"; }
+function fmtSecs(s){ if(s==null) return ""; return s<60? s+"s" : Math.floor(s/60)+"m "+(s%60)+"s"; }
+
+// small, safe markdown: code fences, inline code, bold, links, lists, headings
+function md(src){
+  const hit = mdCache.get(src); if(hit) return hit;
+  const out = md0(src); if(mdCache.size > 400) mdCache.clear(); mdCache.set(src, out); return out;
+}
+function md0(src){
+  const blocks = String(src).split(/```/);
+  return blocks.map((b,i)=>{
+    if(i%2) return `<pre><code>${esc(b.replace(/^[^\n]*\n/,""))}</code></pre>`;
+    const inline = t => esc(t).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
+      .replace(/(https?:\/\/[^\s<)]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
+    return b.split(/\n{2,}/).map(par=>{
+      const lines = par.split("\n").filter(l=>l.trim());
+      if(!lines.length) return "";
+      if(lines.every(l=>/^\s*[-*•]\s/.test(l))) return "<ul>"+lines.map(l=>"<li>"+inline(l.replace(/^\s*[-*•]\s/,""))+"</li>").join("")+"</ul>";
+      if(lines.every(l=>/^\s*\d+[.)]\s/.test(l))) return "<ol>"+lines.map(l=>"<li>"+inline(l.replace(/^\s*\d+[.)]\s/,""))+"</li>").join("")+"</ol>";
+      if(/^#{1,3}\s/.test(lines[0])) return `<h3>${inline(lines[0].replace(/^#+\s/,""))}</h3>`+(lines.length>1?`<p>${lines.slice(1).map(inline).join("<br>")}</p>`:"");
+      return "<p>"+lines.map(inline).join("<br>")+"</p>";
+    }).join("");
+  }).join("");
+}
+
+// ---------- launchers ----------
+// The row itself is the button. The machine chips are CHOOSERS, not launchers:
+// tapping one picks where this launcher goes and is remembered in this window, so the
+// glowing chip always means "the row starts here". Until you pick, the glow is the
+// server's own suggestion (the least busy machine).
+const GROUPS = [["cloud","Cloud"],["local","Local"],["tasks","Tasks"]];
+let openGroups = new Set(); try { openGroups = new Set(JSON.parse(localStorage.getItem("ms.groups")||"[]")); } catch {}
+let pickBy = {}; try { pickBy = JSON.parse(localStorage.getItem("ms.pick")||"{}"); } catch {}
+function launchItem(label, opts, main){
+  // a chosen machine wins; if it went offline it is not in opts and we fall back to the suggestion
+  const best = opts.find(o=>o.machine===pickBy[label]) || opts.find(o=>o.best) || opts[0];
+  const multi = opts.length > 1;
+  const chips = multi ? `<span class="chips">${opts.map(o=>`<button class="chip${o.machine===best.machine?" best":""}" style="--c:${MC[o.machine]}" data-choose="${esc(label)}" data-machine="${o.machine}" title="Send ${esc(label)} to the ${MN[o.machine]}">${MN[o.machine]}</button>`).join("")}</span>` : "";
+  return `<div class="li${main?" main":""}" style="--c:${best.color}">
+    <button class="lb" data-launch="${esc(best.id)}" data-machine="${best.machine}">
+      <span class="ln">${esc(label)}</span>${multi?`<span class="on" style="--m:${MC[best.machine]}">on ${MN[best.machine]}</span>`:""}
+      ${opts[0].note?`<small>${esc(opts[0].note)}</small>`:""}</button>${chips}</div>`;
+}
+function launchHtml(){
+  const by = new Map();
+  for(const l of S.launchers){ if(!by.has(l.label)) by.set(l.label, []); by.get(l.label).push(l); }
+  const of = g => [...by.entries()].filter(([,o])=>o[0].group===g);
+  const main = of("main").map(([lab,o])=>launchItem(lab, o, true)).join("");
+  const groups = GROUPS.map(([g,name])=>{ const items = of(g); if(!items.length) return "";
+    return `<details class="grp" data-g="${g}"${openGroups.has(g)?" open":""}><summary>${name}<span class="cnt">${items.length}</span></summary><div class="items">${items.map(([lab,o])=>launchItem(lab,o,false)).join("")}</div></details>`; }).join("");
+  return `<section class="glass launch">${main}${groups}</section>`;
+}
+function toast(t){ let e=$("#toast"); if(!e){ e=document.createElement("div"); e.id="toast"; document.body.appendChild(e); } e.textContent=t; e.className="show"; clearTimeout(toast.t); toast.t=setTimeout(()=>e.className="",2600); }
+
+// ---------- list ----------
+function cardHtml(s){
+  const st = s.status==="needs" ? `<span class="badge need">NEEDS YOU</span>`
+    : s.status==="answered" ? `<span class="badge ans">NEW ANSWER</span>`
+    : s.status==="error" ? `<span class="badge err">STOPPED</span>`
+    : s.status==="cooking" ? `<span class="st">${s.kind==="terminal"?"cooking · terminal":"cooking"}</span>`
+    : `<span class="st">${ago(s.updated)}</span>`;
+  return `<button class="card s-${s.status}" data-open="${esc(s.id)}">
+    <span class="dot"></span>
+    <span class="c-name">${esc(s.label)}${s.title?`<small>${esc(s.title)}</small>`:""}</span>${st}
+    <span class="c-last">${esc(s.last)}</span>
+    <span class="end${armed===s.id?" armed":""}" role="button" tabindex="0" data-end="${esc(s.id)}" title="End this session">${armed===s.id?"End it?":"×"}</span></button>`;
+}
+function renderList(){
+  const m = S.machines.map(m=>{
+    const GB = b => Math.round(b/1073741824);
+    const memPct = m.mem ? Math.round(m.mem.used/m.mem.total*100) : null;
+    const mem = m.mem ? `<span class="gpu" title="Memory in use: models stay loaded here even when the GPU reads 0%">RAM <span class="bar"><i style="width:${memPct}%;background:${memPct>85?"var(--err)":memPct>70?"var(--need)":"var(--c)"}"></i></span>${GB(m.mem.used)}/${GB(m.mem.total)} GB</span>` : "";
+    const segs0 = m.gpu==null? "" : `<span class="gpu">GPU <span class="segs">${Array.from({length:7},(_,i)=>`<i class="${i < Math.round(m.gpu/100*7)?"on":""}"></i>`).join("")}</span>${m.gpu}%</span>`;
+    const list = S.sessions.filter(s=>s.machine===m.id);
+    const body = !m.online ? "" : list.length ? list.map(cardHtml).join("") : `<div class="empty">Nothing running. Start one below.</div>`;
+    return `<section class="glass machine${m.online?"":" off"}" style="--c:${MC[m.id]}">
+      <div class="m-head"><span class="m-name">${m.name}</span>${m.online?`<span class="stats">${segs0}${mem}</span>`:`<span class="m-note">○ ${esc(m.note||"offline")}</span>`}</div>
+      <div class="cards">${body}</div></section>`;
+  }).join("");
+  const launch = launchHtml();
+  const html = `<header class="brand"><span class="orb"></span>Moonstone</header><div class="list">${m}</div>${launch}`;
+  if(html === renderList.last && $(".list")) return;   // unchanged: don't rebuild under a click
+  renderList.last = html; const sc = $(".list")?.scrollTop || 0;
+  $("#app").innerHTML = html; $(".list").scrollTop = sc;
+}
+
+// ---------- conversation ----------
+const workCache = {};   // older turns' work is fetched only when you open it
+const SHOW_WORK = true;   // false = chats show answers only, without the folded "Show the work" bar
+function workHtml(t){
+  if(!SHOW_WORK) return "";
+  const i = t.i; const key = openId+":"+i;
+  if(t.work===null){
+    if(!t.hasWork) return "";
+    const got = workCache[key];
+    if(!got) return `<details class="work" data-k="${key}" data-lazy="${i}"><summary>Show the work · ${t.workN} step${t.workN===1?"":"s"}${t.secs?" · "+fmtSecs(t.secs):""}</summary><div class="steps"><div class="step t">Loading…</div></div></details>`;
+    t = {...t, work: got};
+  }
+  if(!t.work.length) return "";
+  const steps = t.work.map((w,j)=> w.k==="text" ? `<div class="step t">${esc(w.text)}</div>`
+    : w.out ? `<div class="step${w.err?" bad":""}"><details data-k="${key}:${j}"${openWork.has(key+":"+j)?" open":""}><summary>${esc(w.line)}</summary><div class="out">${esc(w.out)}</div></details></div>`
+    : `<div class="step">${esc(w.line)}</div>`).join("");
+  const n = t.work.filter(w=>w.k==="tool").length;
+  return `<details class="work" data-k="${key}"${openWork.has(key)||(t.open&&openWork.has(key))?" open":""}><summary>Show the work · ${n} step${n===1?"":"s"}${t.secs?" · "+fmtSecs(t.secs):""}</summary><div class="steps">${steps}</div></details>`;
+}
+function renderConvo(keepScroll){
+  const d = D; const c = MC[d.machine];
+  const box = $(".msgs"); const atBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 60; const prev = box?.scrollTop;
+  const ta = $("#ta"); if(ta) drafts[openId] = ta.value;
+  const pend = pendingSent[openId] || [];
+  for(let j=pend.length-1;j>=0;j--) if(Date.now()-pend[j].at > 120000 || d.turns.slice(-6).some(t=>t.user && t.user.trim()===pend[j].text)) pend.splice(j,1);
+  const turnHtml = d.turns.map((t,i)=>{
+    let h = t.user ? `<div class="u">${esc(t.user)}</div>` : "";
+    if(t.open){
+      const lastStep = [...t.work].reverse().find(w=>w.k==="tool");
+      h += `<div><div class="live"><span class="dot"></span>Working…<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
+    } else if(t.answer || t.hasWork || t.work?.length){
+      h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}</div>`;
+    }
+    return h;
+  }).concat(pend.map(x=>`<div class="u">${esc(x.text)}</div>`));
+  const turns = turnHtml.join("");
+  let ask = "";
+  if(d.perm){
+    const q = d.perm.question?.questions?.[0];
+    ask = q ? `<div class="ask"><b>${esc(q.question)}</b><div class="row">${(q.options||[]).map(o=>`<button class="btn opt" data-answer="${esc(o.label)}">${esc(o.label)}</button>`).join("")}</div></div>`
+      : `<div class="ask"><b>${esc(d.label)} wants to run this. OK?</b><div class="cmd">${esc(d.perm.line)}</div><div class="row"><button class="btn yes" data-allow="1">Allow</button><button class="btn no" data-allow="0">Don't</button></div></div>`;
+  }
+  const notes = (d.err?`<div class="note err">Stopped: ${esc(d.err)}</div>`:"") +
+"";
+  const v = micUi.cls;
+  const mic = `<button class="micb${v?" "+v:""}" id="mic" title="${v==="live"?"Tap to send":"Tap to talk, tap again to send"}">${MIC_SVG}</button>`;
+  const compose = `<div class="glass compose" style="--c:${c}"><textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}<button class="send" id="send">Send</button></div>`;
+  const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>${d.kind==="dock"?`<button class="ghost" id="close" title="End this session">End</button>`:""}`;
+  const body = `${turns||`<div class="empty">Say what you want ${esc(d.label)} to do.</div>`}${ask}${notes}`;
+  // Same chat already on screen: leave the message box alone. Rebuilding it under the cursor made Mac dictation
+  // and typing lose their place and paste the same words twice.
+  const cur = $(".convo"), curTa = $("#ta");
+  if(cur && cur.dataset.id === openId && curTa){
+    const ct = $(".c-top"); if(ct.innerHTML !== top) ct.innerHTML = top;
+    // redraw only the pieces that changed, so typing never waits on a full repaint of the conversation
+    const pieces = turns ? turnHtml.concat([ask+notes]) : [body];
+    const box = $(".msgs"); const kids = box.children;
+    if(box.dataset.keyed !== "1"){ box.innerHTML = ""; box.dataset.keyed = "1"; }
+    pieces.forEach((h,i)=>{ let el = kids[i];
+      if(!el){ el = document.createElement("div"); el.style.display = "contents"; box.appendChild(el); }
+      if(el.__h !== h){ el.innerHTML = h; el.__h = h; } });
+    while(kids.length > pieces.length) box.lastChild.remove();
+    const m = $("#mic"); m.className = "micb" + (v ? " "+v : ""); m.title = v==="live" ? "Tap to send" : "Tap to talk, tap again to send";
+    curTa.readOnly = !!v && !osDict;
+    if(curTa.value !== (drafts[openId]||"") && v && !osDict) { curTa.value = drafts[openId]||""; autosize(curTa); }
+    const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev;
+    narrCheck(d);
+    return;
+  }
+  $("#app").innerHTML = `<div class="convo" data-id="${esc(openId)}" style="--c:${c}">
+    <div class="glass c-top">${top}</div>
+    <div class="glass msgs">${body}</div>${compose}</div>`;
+  const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev;
+  const t2 = $("#ta"); if(t2){ autosize(t2); if(document.activeElement===document.body) t2.focus(); t2.setSelectionRange(t2.value.length,t2.value.length); }
+  narrCheck(d);
+}
+function autosize(t){ t.style.height="auto"; t.style.height=Math.min(180,t.scrollHeight)+"px"; }
+
+// ---------- data ----------
+async function refresh(keepScroll=true){
+  if(openId){ if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(openId)); if(d.error){ openId=null; return refresh(); } D=d; renderConvo(keepScroll); }
+  else { S = await api("/api/state"); learnMachines(S); renderList(); }
+}
+async function open(id){ openId=id; history.replaceState(null,"","#"+encodeURIComponent(id)); micSync(); await refresh(false); }
+function back(){ if(rec && rec.state==="recording") rec.stop(); openId=null; D=null; history.replaceState(null,"",location.pathname); micSync(); refresh(); }
+
+document.addEventListener("toggle", e=>{ const g=e.target.dataset?.g; if(!g) return;
+  e.target.open?openGroups.add(g):openGroups.delete(g); try{ localStorage.setItem("ms.groups", JSON.stringify([...openGroups])); }catch{}
+  renderList.last = null; }, true);
+document.addEventListener("toggle", async e=>{
+  const k=e.target.dataset?.k; if(!k) return; e.target.open?openWork.add(k):openWork.delete(k);
+  const lazy = e.target.dataset.lazy;
+  if(e.target.open && lazy!==undefined && !workCache[k]){
+    const r = await api(`/api/session/${encodeURIComponent(openId)}/work/${lazy}`);
+    if(r.work){ workCache[k]=r.work; renderConvo(true); }
+  }
+}, true);
+document.addEventListener("click", async e=>{
+  const t = e.target;
+  const en = t.closest("[data-end]");
+  if(en){ const id = en.dataset.end;
+    if(armed !== id){ armed = id; renderList.last = null; renderList(); setTimeout(()=>{ if(armed===id){ armed=null; renderList.last=null; renderList(); } }, 4000); return; }
+    armed = null; const r = await api(`/api/session/${encodeURIComponent(id)}/close`, {});
+    toast(r.ok ? "Ended" : (r.error || "Couldn't end it")); return refresh(); }
+  const o = t.closest("[data-open]"); if(o) return open(o.dataset.open);
+  const pk = t.closest("[data-pick]"); if(pk){
+    const opts = S.launchers.filter(x=>x.label===pk.dataset.pick);
+    if(opts.length===1){ const r = await api("/api/launch",{launcher:opts[0].id, machine:opts[0].machine}); return r.id?open(r.id):null; }
+    picking = pk.dataset.pick; return renderList(); }
+  if(t.closest("#nopick")){ picking=null; return renderList(); }
+  const ch = t.closest("[data-choose]"); if(ch){        // chips choose the machine, they do not launch
+    pickBy[ch.dataset.choose] = ch.dataset.machine;
+    try{ localStorage.setItem("ms.pick", JSON.stringify(pickBy)); }catch{}
+    toast(`${ch.dataset.choose} will start on the ${MN[ch.dataset.machine]}`);
+    renderList.last = null; return renderList(); }
+  const l = t.closest("[data-launch]"); if(l){ picking=null;
+    const r = await api("/api/launch",{launcher:l.dataset.launch, machine:l.dataset.machine});
+    if(r.opened){ toast(`Opened ${r.label} on the ${MN[l.dataset.machine]}`); return; }
+    if(r.error){ toast(r.error); return; }
+    return r.id?open(r.id):refresh(); }
+  if(t.closest("#back")) return back();
+  if(t.closest("#narr")) return narrToggle();
+  if(t.closest("#send")){ if(rec){ if(rec.state === "recording") rec.stop(); return; } if(micUi.cls) return; return sendMsg(); }
+  if(t.closest("#stop")) return api(`/api/session/${openId}/stop`,{});
+  if(t.closest("#close")){ await api(`/api/session/${openId}/close`,{}); return back(); }
+  if(t.closest("#cont")){ const [mach, local] = openId.includes("~") ? openId.split("~") : [null, openId];
+    const r = await api("/api/continue",{sessionId:local.slice(2), machine:mach||undefined}); return r.id?open(r.id):null; }
+  const a = t.closest("[data-allow]"); if(a){ await api(`/api/session/${openId}/perm`,{request_id:D.perm.request_id, allow:a.dataset.allow==="1"}); return refresh(); }
+  const q = t.closest("[data-answer]"); if(q){ await api(`/api/session/${openId}/perm`,{request_id:D.perm.request_id, allow:false, answer:q.dataset.answer}); return refresh(); }
+});
+// ---------- push to talk ----------
+// Tap the mic, say it, tap again. The clip is transcribed by whisper on the machine serving
+// this page and goes straight into the open session. Nothing leaves your machines.
+let rec = null, recChunks = [], recTimer = null, recStart = 0;
+const mmss = s => Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
+const MIC_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>`;
+let micUi = {cls:"", label:""};
+function micSync(){}
+function micState(cls){
+  if(micUi.cls === (cls||"")) return;
+  micUi = {cls: cls||"", label:""};
+  if(openId && D) renderConvo(true);
+}
+// tap to turn it on, tap again to turn it off — turning it off sends it
+document.addEventListener("pointerdown", e=>{
+  if(!e.target.closest("#mic")) return;
+  e.preventDefault();
+  if(micUi.cls === "busy") return;                 // still writing the last bit down
+  if(osDict) return osDictOff();
+  if(sr){ sr.wantOff = true; sr.stop(); return; }
+  if(rec){ if(rec.state === "recording") rec.stop(); return; }
+  narrHush();
+  osDictOn();
+});
+// Best path: the computer's own dictation (Mac: Edit > Start Dictation via a helper app, Windows: Win+H), pressed for us by the Moonstone
+// on this machine. Words type straight into the box at native speed. Only works in a window on the machine
+// itself; anywhere else (or if it fails) the browser dictation / whisper paths take over.
+let osDict = null;
+// a window opened on the machine itself talks to its own server; a copy served from elsewhere reaches the server on whichever machine it's open on
+const DICT_URL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? BASE + "api/dictate" : "http://127.0.0.1:8899/api/dictate";
+async function osDictOn(){
+  if(!openId) return toast("Open a session first, then tap the mic");
+  const ta = $("#ta"); if(ta){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  let ok = false, reached = false, why = "";
+  try { const r = await fetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"start"}'}); ok = r.ok; reached = r.status !== 409;
+        if(!ok) why = (await r.json().catch(()=>({}))).error || ""; } catch {}
+  // This machine has the real dictation but it hiccupped: say so. Never quietly switch to the browser's own recording -
+  // it can pick a different microphone (a nearby phone via Continuity, say) and runs a second, worse transcriber.
+  if(!ok && reached) return toast("Dictation didn't start, tap again");
+  if(!ok){ if(SR && !srBroken) return srStart(); return micToggle(); }
+  osDict = {sendTo: openId}; micState("live"); const t = $("#ta"); if(t) t.focus();
+}
+async function osDictOff(){
+  const {sendTo} = osDict; osDict = null;
+  micState("busy"); const redUntil = Date.now() + 2000;
+  const t = $("#ta"); if(t) t.focus();
+  let stopped = false;
+  try { stopped = (await fetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"stop"}'})).ok; } catch {}
+  if(!stopped) toast("The mic may still be on, tap it to turn it off");
+  await new Promise(z => setTimeout(z, 250));            // just long enough for Apple's last word to land
+  const ta = $("#ta"); if(ta) drafts[sendTo] = ta.value;
+  if(openId === sendTo && ta && ta.value.trim()) sendMsg(); else toast("I didn't catch that");
+  await new Promise(z => setTimeout(z, Math.max(0, redUntil - Date.now())));
+  micState(null);
+}
+// The instant path: the browser's own dictation (in Safari that is Apple's engine, the same one as system dictation),
+// words land as you say them. Brave advertises it but can't run it - the first failure flips to whisper for good.
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let sr = null, srBroken = false; try { srBroken = localStorage.getItem("moonstone.srBroken") === "1"; } catch {}
+function srStart(){
+  if(!openId) return toast("Open a session first, then tap the mic");
+  const sendTo = openId, ta0 = $("#ta"), base = ((ta0 ? ta0.value : drafts[openId]) || "").trim();
+  let done = "", heard = false;
+  const show = words => { const v = (base && words ? base+" " : base) + (words||"");
+    drafts[sendTo] = v; const ta = $("#ta"); if(ta && openId === sendTo){ ta.value = v; autosize(ta); ta.scrollTop = ta.scrollHeight; } };
+  const r = sr = new SR(); r.lang = "en-US"; r.continuous = true; r.interimResults = true;
+  r.onresult = e => { heard = true; let fin = "", mid = "";
+    for(let i=0;i<e.results.length;i++){ const x = e.results[i][0].transcript; if(e.results[i].isFinal) fin += x; else mid += x; }
+    done = fin; show((fin + mid).trim()); };
+  r.onerror = e => {
+    if(!heard && /network|service-not-allowed|language-not-supported/.test(e.error)){   // this browser can't do it: use whisper
+      srBroken = true; try { localStorage.setItem("moonstone.srBroken","1"); } catch {}
+      r.fallback = true;
+    }
+  };
+  r.onend = async () => {
+    if(r.fallback){ sr = null; micState(null); return micToggle(); }
+    if(!r.wantOff){ try { r.start(); return; } catch {} }        // it paused on its own: keep listening until you tap
+    sr = null;
+    micState("busy"); const redUntil = Date.now() + 2000;
+    const text = (drafts[sendTo]||"").trim();
+    if(openId === sendTo && text) sendMsg(); else if(!text) toast("I didn't catch that");
+    await new Promise(z => setTimeout(z, Math.max(0, redUntil - Date.now())));
+    micState(null);
+  };
+  try { r.start(); } catch { sr = null; srBroken = true; return micToggle(); }
+  micState("live");
+}
+const stt = blob => fetch(BASE + "api/stt", {method:"POST", headers:{"content-type":"application/octet-stream","x-dock":"1"}, body: blob}).then(r=>r.json());
+async function micToggle(){
+  if(rec){ if(rec.state === "recording") rec.stop(); return; }
+  if(!openId) return toast("Open a session first, then tap the mic");
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return toast("This window can't reach a microphone");
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}); }
+  catch { return toast("The microphone is blocked — allow it in the address bar"); }
+  const sendTo = openId;
+  const ta0 = $("#ta"); const base = ((ta0 ? ta0.value : drafts[openId]) || "").trim();
+  const show = words => {                            // live words go straight into the message box
+    const v = (base && words ? base+" " : base) + (words||"");
+    drafts[sendTo] = v; const ta = $("#ta"); if(ta && openId === sendTo){ ta.value = v; autosize(ta); ta.scrollTop = ta.scrollHeight; }
+  };
+  recChunks = []; recStart = Date.now();
+  const opus = window.MediaRecorder && MediaRecorder.isTypeSupported("audio/webm;codecs=opus");
+  const r0 = rec = new MediaRecorder(stream, opus ? {mimeType:"audio/webm;codecs=opus"} : {});
+  rec.ondataavailable = e => { if(e.data && e.data.size) recChunks.push(e.data); };
+  // While you talk: every time whisper finishes, hand it everything said so far. One request at a time, so
+  // the words trail you by about a second and a half.
+  let inFlight = false, gen = 0;
+  const peek = async () => {
+    if(inFlight || rec !== r0 || r0.state !== "recording") return;
+    const blob = new Blob(recChunks, {type: r0.mimeType || "audio/webm"}); if(blob.size < 1500) return;
+    inFlight = true; const my = ++gen;
+    try { const j = await stt(blob); if(rec === r0 && my === gen && j && j.text) show(j.text); } catch {}
+    inFlight = false;
+  };
+  rec.onstop = async () => {
+    clearInterval(recTimer); stream.getTracks().forEach(t=>t.stop()); gen++;
+    const blob = new Blob(recChunks, {type: r0.mimeType || "audio/webm"});
+    rec = null;
+    if(blob.size < 1500){ show(""); micState(null); return toast("I didn't catch that"); }
+    micState("busy");
+    const redUntil = Date.now() + 2000;
+    let j; try { j = await stt(blob); } catch {}
+    await new Promise(z => setTimeout(z, Math.max(0, redUntil - Date.now())));
+    micState(null);
+    if(!j || !j.text){ show(""); return toast((j && j.error) || "Couldn't reach the transcriber"); }
+    show(j.text);
+    if(openId !== sendTo) return toast("Left it in that chat's message box");   // moved on: don't misfile it
+    sendMsg();
+  };
+  rec.start(500);
+  micState("live");
+  recTimer = setInterval(()=>{
+    if((Date.now()-recStart)/1000 >= 120 && rec && rec.state === "recording") return rec.stop();   // hard cap
+    peek();
+  }, 400);
+}
+
+// ---------- narration ----------
+// Tap the speaker at the top of a chat: every answer that finishes from then on is read out loud in the
+// local Kokoro voice the server points at. On/off is remembered. Old answers are never read back.
+const SPK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`;
+let narrOn = false; try { narrOn = localStorage.getItem("moonstone.narr") === "1"; } catch {}
+const narrSeen = {};          // chat id -> the last answer we've already dealt with (read, or there before we looked)
+let narrQ = [], narrAudio = null, narrGen = 0;
+function narrKey(d){ for(let i=d.turns.length-1;i>=0;i--){ const t=d.turns[i]; if(t.open) return null; if(t.answer) return i+"|"+t.answer.length; } return ""; }
+function narrCheck(d){
+  const k = narrKey(d);                                       // null = still working on it
+  if(!(openId in narrSeen)){ narrSeen[openId] = k === null ? "working" : k; return; }  // first look: don't read the past
+  if(k === null || narrSeen[openId] === k) return;
+  narrSeen[openId] = k;
+  if(!narrOn || !k) return;
+  const t = d.turns[+k.split("|")[0]]; narrSay(t.answer);
+}
+function narrText(md){
+  return md.replace(/```[\s\S]*?```/g," ").replace(/`([^`]*)`/g,"$1").replace(/!?\[([^\]]*)\]\([^)]*\)/g,"$1")
+    .replace(/https?:\/\/\S+/g,"a link").replace(/^\s*[-*>#]+\s*/gm,"").replace(/[*_~|]/g,"").replace(/\s+/g," ").trim();
+}
+// With Moonstone open on more than one computer, only the window you used last speaks.
+const WIN_ID = Math.random().toString(36).slice(2, 10);
+let claimedAt = 0;
+function narrClaim(){ if(Date.now() - claimedAt < 3000) return; claimedAt = Date.now();
+  fetch(BASE+"api/narrator",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({id:WIN_ID})}).catch(()=>{}); }
+addEventListener("pointerdown", narrClaim, true); addEventListener("keydown", narrClaim, true);
+async function narrSay(md){
+  try { const o = await (await fetch(BASE+"api/narrator")).json(); if(o.id && o.id !== WIN_ID) return; } catch {}
+  narrHush(); const my = narrGen;
+  const parts = (narrText(md).match(/[^.!?]+[.!?]*\s*/g) || []).reduce((a,x)=>{ if(a.length && (a[a.length-1]+x).length < 300) a[a.length-1]+=x; else a.push(x); return a; }, []);
+  // ask for every piece up front so there's no gap between them, play them in order
+  narrQ = parts.map(p => fetch(BASE+"api/tts",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({text:p})})
+    .then(r => r.ok ? r.blob() : null).catch(()=>null));
+  (async()=>{
+    for(const pr of narrQ){
+      const b = await pr; if(my !== narrGen) return; if(!b) continue;
+      const u = URL.createObjectURL(b); narrAudio = new Audio(u);
+      await new Promise(z => { narrAudio.onended = narrAudio.onerror = z; narrAudio.play().catch(z); });
+      URL.revokeObjectURL(u); if(my !== narrGen) return;
+    }
+    narrAudio = null;
+  })();
+}
+function narrHush(){ narrGen++; narrQ = []; if(narrAudio){ try { narrAudio.pause(); } catch {} narrAudio = null; } }
+function narrToggle(){
+  narrOn = !narrOn; try { localStorage.setItem("moonstone.narr", narrOn?"1":"0"); } catch {}
+  if(!narrOn) narrHush();
+  else new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=").play().catch(()=>{});   // unlock sound on this tap
+  toast(narrOn ? "Narration on" : "Narration off");
+  if(D) renderConvo(true);
+}
+
+async function sendMsg(){
+  const ta=$("#ta"); const text=ta.value.trim(); if(!text) return;
+  ta.value=""; drafts[openId]=""; autosize(ta);
+  (pendingSent[openId] = pendingSent[openId] || []).push({text, at: Date.now()}); saveDrafts();
+  if(D && D.turns) renderConvo(false);                                // on screen now, not after the round trip
+  const r = await api(`/api/session/${encodeURIComponent(openId)}/send`,{text});
+  if(r.error === "ended" || r.error === "not found"){ pendingSent[openId] = []; toast("That session was ended"); return back(); }
+  if(r.id && r.id!==openId){ drafts[r.id]=""; return open(r.id); }   // a terminal session just moved in here
+  refresh(false);
+}
+document.addEventListener("keydown", e=>{
+  if(e.target.id==="ta" && e.key==="Enter" && !e.shiftKey){
+    e.preventDefault();
+    // mic still on: Enter is the same as tapping it off (stops listening, then sends)
+    if(micUi.cls === "busy") return;
+    if(osDict) return osDictOff();
+    if(sr){ sr.wantOff = true; sr.stop(); return; }
+    if(rec){ if(rec.state === "recording") rec.stop(); return; }
+    sendMsg();
+  }
+  if(e.key==="Escape" && openId) back();
+});
+document.addEventListener("input", e=>{ if(e.target.id==="ta"){ autosize(e.target); drafts[openId]=e.target.value; saveDrafts(); lastKey=Date.now(); } });
+
+let pending=false, stale=false;
+// a hidden tab doesn't refetch; it catches up the moment you look at it
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && stale){ stale=false; refresh(); } });
+function connect(){
+  const es = new EventSource(BASE + "api/events");
+  es.onmessage = ev=>{ try{ const j=JSON.parse(ev.data); const v=j.v; if(v){ if(window.__v && v!==window.__v){ reloadSoon(); return; } window.__v=v; }
+      // a Desktop launcher on this computer just started a session: jump to it
+      if(j.focus){ if(window.__f===undefined) window.__f=j.focus.at; else if(j.focus.at>window.__f){ window.__f=j.focus.at; open(j.focus.id); return; } }
+      else if(window.__f===undefined) window.__f=0;
+    }catch{} if(document.activeElement?.id==="ta" && openId && !D?.busy && !D?.perm){} if(pending) return; pending=true; setTimeout(()=>{pending=false; if(document.hidden){ stale=true; return; } refresh();},400); };
+}
+let lastKey = 0;
+function reloadSoon(){   // a design change landed: reload, but only once the box is empty and you're not mid-thought
+  const ta = $("#ta");
+  if(rec || sr || osDict || (ta && ta.value.trim()) || Date.now()-lastKey < 3000) return setTimeout(reloadSoon, 1500);
+  saveDrafts(); location.reload();
+}
+const h = decodeURIComponent(location.hash.slice(1)); if(h) openId=h;
+refresh(false); connect();
+</script>
+</body>
+</html>

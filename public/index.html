@@ -357,19 +357,26 @@ function renderConvo(keepScroll){
   // and typing lose their place and paste the same words twice.
   const cur = $(".convo"), curTa = $("#ta");
   if(cur && cur.dataset.id === openId && curTa){
+    // Dictation (our mic, or the system dictation shortcut such as pressing Control twice) can't start or keep
+    // going while the page repaints under it every 400ms, so hold the conversation still while it's starting
+    // or words are arriving; catch up after.
+    // the mic's color always updates right away, even while the conversation is holding still
+    { const m = $("#mic"); if(m){ m.className = "micb" + (v ? " "+v : ""); m.title = v==="live" ? "Tap to send" : "Tap to talk, tap again to send"; } }
+    if(holdStill()){ clearTimeout(renderConvo.later); renderConvo.later = setTimeout(()=>renderConvo(true), 600); return; }
     const ct = $(".c-top"); if(ct.innerHTML !== top) ct.innerHTML = top;
     // redraw only the pieces that changed, so typing never waits on a full repaint of the conversation
     const pieces = turns ? turnHtml.concat([ask+notes]) : [body];
     const box = $(".msgs"); const kids = box.children;
     if(box.dataset.keyed !== "1"){ box.innerHTML = ""; box.dataset.keyed = "1"; }
+    let changed = false;
     pieces.forEach((h,i)=>{ let el = kids[i];
       if(!el){ el = document.createElement("div"); el.style.display = "contents"; box.appendChild(el); }
-      if(el.__h !== h){ el.innerHTML = h; el.__h = h; } });
-    while(kids.length > pieces.length) box.lastChild.remove();
+      if(el.__h !== h){ el.innerHTML = h; el.__h = h; changed = true; } });
+    while(kids.length > pieces.length){ box.lastChild.remove(); changed = true; }
     const m = $("#mic"); m.className = "micb" + (v ? " "+v : ""); m.title = v==="live" ? "Tap to send" : "Tap to talk, tap again to send";
     curTa.readOnly = !!v && !osDict;
     if(curTa.value !== (drafts[openId]||"") && v && !osDict) { curTa.value = drafts[openId]||""; autosize(curTa); }
-    const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev;
+    if(changed){ const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev; }
     narrCheck(d);
     return;
   }
@@ -379,6 +386,13 @@ function renderConvo(keepScroll){
   const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev;
   const t2 = $("#ta"); if(t2){ autosize(t2); if(document.activeElement===document.body) t2.focus(); t2.setSelectionRange(t2.value.length,t2.value.length); }
   narrCheck(d);
+}
+let lastCtrl = 0, lastDictTap = 0;
+document.addEventListener("keydown", e=>{ if(e.key === "Control") lastCtrl = Date.now(); }, true);
+function holdStill(){
+  const now = Date.now();
+  return !!(osDict || sr) || now - lastDictTap < 6000 || now - lastCtrl < 4000 ||
+    (document.activeElement?.id === "ta" && now - lastKey < 2500);
 }
 function autosize(t){ t.style.height="auto"; t.style.height=Math.min(180,t.scrollHeight)+"px"; }
 
@@ -451,13 +465,19 @@ function micState(cls){
 document.addEventListener("pointerdown", e=>{
   if(!e.target.closest("#mic")) return;
   e.preventDefault();
+  lastDictTap = Date.now();
+  narrHush();
   if(micUi.cls === "busy") return;                 // still writing the last bit down
   if(osDict) return osDictOff();
   if(sr){ sr.wantOff = true; sr.stop(); return; }
   if(rec){ if(rec.state === "recording") rec.stop(); return; }
   narrHush();
+  // a phone has no Moonstone server of its own: go straight to its built-in dictation (Apple's engine on an
+  // iPhone), inside the tap itself, because iOS only grants the mic to a page that asks right on the tap
+  if(IS_PHONE && SR && !srBroken) return srStart();
   osDictOn();
 });
+const IS_PHONE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
 // Best path: the computer's own dictation (Mac: Edit > Start Dictation via a helper app, Windows: Win+H), pressed for us by the Moonstone
 // on this machine. Words type straight into the box at native speed. Only works in a window on the machine
 // itself; anywhere else (or if it fails) the browser dictation / whisper paths take over.
@@ -480,12 +500,14 @@ async function osDictOff(){
   const {sendTo} = osDict; osDict = null;
   micState("busy"); const redUntil = Date.now() + 2000;
   const t = $("#ta"); if(t) t.focus();
-  let stopped = false;
-  try { stopped = (await fetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"stop"}'})).ok; } catch {}
-  if(!stopped) toast("The mic may still be on, tap it to turn it off");
-  await new Promise(z => setTimeout(z, 250));            // just long enough for Apple's last word to land
+  // ask for the stop, but don't wait on it: the helper takes a few seconds to confirm, and your message
+  // shouldn't sit there. Words are already in the box; give Apple a beat for the last one, then send.
+  const stopping = fetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"stop"}'})
+    .then(r => r.ok).catch(() => false);
+  await new Promise(z => setTimeout(z, 250));
   const ta = $("#ta"); if(ta) drafts[sendTo] = ta.value;
   if(openId === sendTo && ta && ta.value.trim()) sendMsg(); else toast("I didn't catch that");
+  if(!(await stopping)) toast("The mic may still be on, tap it to turn it off");
   await new Promise(z => setTimeout(z, Math.max(0, redUntil - Date.now())));
   micState(null);
 }
@@ -600,6 +622,7 @@ function narrClaim(){ if(Date.now() - claimedAt < 3000) return; claimedAt = Date
   fetch(BASE+"api/narrator",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({id:WIN_ID})}).catch(()=>{}); }
 addEventListener("pointerdown", narrClaim, true); addEventListener("keydown", narrClaim, true);
 async function narrSay(md){
+  if(micLive()) return;                                        // you're talking: never read over you
   try { const o = await (await fetch(BASE+"api/narrator")).json(); if(o.id && o.id !== WIN_ID) return; } catch {}
   narrHush(); const my = narrGen;
   const parts = (narrText(md).match(/[^.!?]+[.!?]*\s*/g) || []).reduce((a,x)=>{ if(a.length && (a[a.length-1]+x).length < 300) a[a.length-1]+=x; else a.push(x); return a; }, []);
@@ -608,7 +631,7 @@ async function narrSay(md){
     .then(r => r.ok ? r.blob() : null).catch(()=>null));
   (async()=>{
     for(const pr of narrQ){
-      const b = await pr; if(my !== narrGen) return; if(!b) continue;
+      const b = await pr; if(my !== narrGen || micLive()) return; if(!b) continue;
       const u = URL.createObjectURL(b); narrAudio = new Audio(u);
       await new Promise(z => { narrAudio.onended = narrAudio.onerror = z; narrAudio.play().catch(z); });
       URL.revokeObjectURL(u); if(my !== narrGen) return;
@@ -616,6 +639,7 @@ async function narrSay(md){
     narrAudio = null;
   })();
 }
+function micLive(){ return !!(osDict || sr || rec) || micUi.cls === "live"; }
 function narrHush(){ narrGen++; narrQ = []; if(narrAudio){ try { narrAudio.pause(); } catch {} narrAudio = null; } }
 function narrToggle(){
   narrOn = !narrOn; try { localStorage.setItem("moonstone.narr", narrOn?"1":"0"); } catch {}
@@ -628,6 +652,7 @@ function narrToggle(){
 async function sendMsg(){
   const ta=$("#ta"); const text=ta.value.trim(); if(!text) return;
   ta.value=""; drafts[openId]=""; autosize(ta);
+  lastDictTap = lastCtrl = lastKey = 0;                                // you're done talking: show it now, no holding still
   (pendingSent[openId] = pendingSent[openId] || []).push({text, at: Date.now()}); saveDrafts();
   if(D && D.turns) renderConvo(false);                                // on screen now, not after the round trip
   const r = await api(`/api/session/${encodeURIComponent(openId)}/send`,{text});

@@ -810,7 +810,7 @@ const server = http.createServer(async (req, res) => {
               // no -W: the helper often exits before open can wait on it ("kevent failed"); poll for its answer instead
               execFile("/usr/bin/open", ["-g", "--stdout", out, app, "--args", mode], { timeout: 8000 }, async e => {
                 if (e) return bad(e);
-                let said = ""; for (let i = 0; i < 180 && !said; i++) { await new Promise(z => setTimeout(z, 50)); try { said = fs.readFileSync(out, "utf8").trim(); } catch {} }
+                let said = ""; for (let i = 0; i < 280 && !said; i++) { await new Promise(z => setTimeout(z, 50)); try { said = fs.readFileSync(out, "utf8").trim(); } catch {} }
                 fs.appendFile(path.join(__dirname, "dictate.log"), `${new Date().toLocaleTimeString()} want=${mode} ${said || "(no answer)"}\n`, () => {});
                 ok(said); }); });
             // The helper opens the Edit menu, reads whether dictation is on, and clicks only if that changes it.

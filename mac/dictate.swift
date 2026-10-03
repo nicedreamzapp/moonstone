@@ -59,6 +59,11 @@ func findItem() -> (AXUIElement?, String) {
             let t = title(it); if t.hasPrefix("Start Dictation") || t.hasPrefix("Stop Dictation") || (t.hasPrefix("Cancel Dictation") && item == nil) { item = it; label = t } } }
         if item != nil { break }; usleep(50_000)
     }
+    // Some browsers (Brave, for one) rewrite the item a moment after the menu opens; the first read can be the old state.
+    // Keep reading for ~0.5s and go with the last thing it says.
+    if item != nil { for _ in 0..<10 { usleep(50_000)
+        for menu in kids(editTop) { for it in kids(menu) { let t = title(it)
+            if t.hasPrefix("Start Dictation") || t.hasPrefix("Stop Dictation") || t.hasPrefix("Cancel Dictation") { item = it; label = t } } } } }
     return (item, label)
 }
 // A browser's menu label can be one step stale (it can say "Stop Dictation" while the mic is already off), so the
@@ -79,12 +84,14 @@ func micRunning() -> Bool? {
     }
     return sawInput ? false : nil
 }
-func isOn(_ label: String) -> Bool { micRunning() ?? !label.hasPrefix("Start") }
-// after a press, watch the microphone itself until it lands where we wanted (up to ~1.2s)
+// A running mic is proof it's on; a quiet mic proves nothing (Apple's dictation doesn't always show up
+// in CoreAudio as a running input), so otherwise the settled menu label decides.
+func isOn(_ label: String) -> Bool { micRunning() == true || !label.hasPrefix("Start") }
+// after a press, give it a moment, then ask a freshly opened menu (and the mic) whether it changed
 func settles(_ want: Bool) -> Bool {
-    guard micRunning() != nil else { return true }                       // no mic to read: trust the press
-    for _ in 0..<24 { if micRunning() == want { return true }; usleep(50_000) }
-    return false
+    for _ in 0..<16 { if want && micRunning() == true { return true }; usleep(50_000) }
+    let (_, now) = findItem(); close()
+    return now.isEmpty ? true : isOn(now) == want
 }
 
 var (item, label) = findItem()
@@ -94,10 +101,7 @@ guard item != nil else {
 if mode == "status" { close(); print(isOn(label) ? "on in \(name)" : "off in \(name)"); exit(0) }
 let want = mode == "start"
 if isOn(label) == want { close(); print("already-\(want ? "on" : "off") in \(name)"); exit(0) }
-// press, then check the mic really changed; one retry with a freshly opened menu, then say it failed
-for attempt in 1...2 {
-    if attempt > 1 { (item, label) = findItem(); guard item != nil else { close(); break } }
-    AXUIElementPerformAction(item!, kAXPressAction as CFString)          // pressing an item also closes the menu
-    if settles(want) { print("\(want ? "started" : "stopped") in \(name)\(attempt > 1 ? " (2nd try)" : "")"); exit(0) }
-}
-print("unchanged: mic still \(want ? "off" : "on") in \(name)"); exit(1)
+// one press, then check it really changed. Never press twice: a second press toggles it back.
+AXUIElementPerformAction(item!, kAXPressAction as CFString)              // pressing an item also closes the menu
+if settles(want) { print("\(want ? "started" : "stopped") in \(name)"); exit(0) }
+print("unchanged: still \(want ? "off" : "on") in \(name)"); exit(1)

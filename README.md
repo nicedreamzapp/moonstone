@@ -53,13 +53,13 @@ It is one Node file and one HTML file. No npm dependencies, no build step, no cl
 
 <img src="docs/img/conversation.png" alt="Conversation with the narration speaker on and the mic listening" width="100%">
 
-**Push to talk.** Tap the mic, talk, tap again (or press Enter) and it stops listening and sends. Moonstone tries three paths, best first:
+**Push to talk.** Tap the mic, talk, then tap it again and it stops listening and sends. Pressing Enter while the mic is listening does exactly the same thing. Tapping the mic also silences narration right away, and nothing is read aloud while the mic is on. While you dictate, the conversation holds still instead of redrawing under your words, then catches up a moment later. Moonstone tries three paths, best first:
 
-1. **Your OS's own dictation.** On macOS a small signed helper app opens the focused app's *Edit* menu and clicks *Start Dictation* or *Stop Dictation*, then checks with CoreAudio that a microphone actually turned on or off, retrying once if it did not. On Windows it presses Win+H. Words type straight into the message box at native speed.
-2. **The browser's speech recognition**, where the browser can actually run it. If it fails once, Moonstone remembers and stops trying it.
+1. **Your OS's own dictation.** On macOS a small signed helper app opens the focused app's *Edit* menu and clicks *Start Dictation* or *Stop Dictation*, then checks that it really changed: a microphone running in CoreAudio counts as on, otherwise a freshly opened menu decides (the menu label can lag a moment, so it is read again after it settles). It presses only once, because a second press would toggle dictation back. If the stop cannot be confirmed you get a note to tap the mic again. On Windows it presses Win+H. Words type straight into the message box at native speed.
+2. **The browser's speech recognition**, where the browser can actually run it. On a phone this is the first choice, started inside the tap itself because iOS only lets a page use the mic in direct response to one. If it fails once, Moonstone remembers and stops trying it.
 3. **Local Whisper.** The browser records, posts the audio to `/api/stt`, and the server runs `ffmpeg` and `mlx_whisper` (`mlx-community/whisper-large-v3-turbo` by default) on the same machine. While you talk it keeps re-transcribing what you have said so far, one request at a time, so the words trail your voice instead of arriving at the end. Recordings are capped at two minutes.
 
-**Narration.** Tap the speaker in a conversation and every answer that finishes from then on is read aloud. The server sends the text, split into sentences, to a local TTS server (Kokoro, voice `af_heart` by default) and plays the WAVs back in order. Code blocks are skipped and links become "a link". With Moonstone open on several machines, only the window you touched last speaks.
+**Narration.** Tap the speaker in a conversation and every answer that finishes from then on is read aloud. The server sends the text, split into sentences, to a local TTS server (Kokoro, voice `af_heart` by default) and plays the WAVs back in order. Code blocks are skipped and links become "a link". With Moonstone open on several machines, only the window you touched last speaks. Tap the mic to cut it off mid sentence.
 
 ### Local models in the same list
 

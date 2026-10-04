@@ -96,6 +96,22 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .badge.err{color:#ffc2cc;background:rgba(255,95,122,.14);border:1px solid rgba(255,95,122,.45)}
 @keyframes glow{50%{box-shadow:0 0 26px rgba(255,171,61,.6)}}
 @keyframes beat{50%{opacity:.55}}
+/* background jobs card (10/4): pulsing ring, what's running, progress, ETA; sticks to the bottom of the chat */
+.jobs{position:sticky;bottom:0;z-index:2;display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.job{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;padding:8px 12px;border-radius:12px;background:rgba(20,16,8,.82);border:1px solid rgba(255,170,40,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.job .ring{grid-row:1/3;width:12px;height:12px;border-radius:50%;background:#ffaa28;animation:jobpulse 1.4s ease-out infinite}
+@keyframes jobpulse{0%{box-shadow:0 0 0 0 rgba(255,170,40,.7)}70%{box-shadow:0 0 0 10px rgba(255,170,40,0)}100%{box-shadow:0 0 0 0 rgba(255,170,40,0)}}
+.job .jl{font-size:12px;color:#ffd08a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.job .jm{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:0}
+.job .bar{flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden;position:relative;min-width:40px}
+.job .bar i{position:absolute;inset:0 auto 0 0;background:#ffaa28;border-radius:2px}
+.job .bar.ind i{width:30%;animation:jobslide 1.6s ease-in-out infinite}
+@keyframes jobslide{0%{left:-30%}100%{left:100%}}
+.job .jeta{flex-shrink:0;white-space:nowrap}
+.job .js{grid-column:2;display:flex;gap:6px;font-family:var(--mono);font-size:11px;color:#e8c58a;min-width:0}
+.job .js .jst{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;animation:beat 1.6s infinite}
+.job .js .ago{color:var(--faint);flex-shrink:0;white-space:nowrap}
+.job .kind{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#ffaa28;margin-right:6px}
 .empty{color:var(--faint);font-size:12px;padding:6px 6px 4px}
 
 .launch{padding:10px;display:flex;flex-direction:column;gap:8px;flex-shrink:0;max-height:55%;overflow-y:auto}
@@ -323,6 +339,35 @@ function workHtml(t){
   const n = t.work.filter(w=>w.k==="tool").length;
   return `<details class="work" data-k="${key}"${openWork.has(key)||(t.open&&openWork.has(key))?" open":""}><summary>Show the work · ${n} step${n===1?"":"s"}${t.secs?" · "+fmtSecs(t.secs):""}</summary><div class="steps">${steps}</div></details>`;
 }
+// background jobs on the machine running this chat (10/4) — the ETA text ticks every second in place
+function jobEta(j){
+  const now = Date.now()/1000; let left = null;
+  if(j.total && j.done > 0) left = (now - j.start) / j.done * (j.total - j.done);
+  if(left === null && j.eta_end) left = j.eta_end - now;
+  const f = s => { s = Math.max(0, Math.round(s)); return s >= 3600 ? `${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m` : s >= 60 ? `${Math.floor(s/60)}m ${String(s%60).padStart(2,"0")}s` : `${s}s`; };
+  if(left === null) return `running ${f(now - j.start)}`;
+  if(left <= 0) return "finishing up";
+  const fin = new Date((now + left)*1000).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+  return `~${f(left)} left · done ${fin}`;
+}
+function jobsHtml(d){
+  const js = d.jobs || []; if(!js.length) return "";
+  return `<div class="jobs">${js.map(j=>{ const pct = j.total ? Math.min(100, Math.round(100*j.done/j.total)) : null;
+    const kind = j.kind==="agent" ? "agent" : j.kind==="monitor" ? "watch" : j.kind==="bash" ? "task" : "job";
+    if(pct===null && j.eta_end && j.start) j._pct = 1;
+    return `<div class="job" data-job='${esc(JSON.stringify(j))}'><span class="ring"></span><div class="jl"><span class="kind">${kind}</span>${esc(j.label)}</div>
+      <div class="jm"><span class="bar${pct===null&&!j.eta_end?" ind":""}"><i style="${pct!==null?`width:${pct}%`:j.eta_end?`width:${jobTimePct(j)}%`:""}"></i></span>${j.total?`<span>${j.done}/${j.total}</span>`:""}<span class="jeta">${esc(jobEta(j))}</span></div>
+      ${j.step?`<div class="js"><span class="jst">${esc(j.step)}</span><span class="ago">${esc(jobAgo(j))}</span></div>`:""}</div>`; }).join("")}</div>`;
+}
+function jobTimePct(j){ const now = Date.now()/1000; return Math.max(3, Math.min(97, Math.round(100*(now-j.start)/Math.max(1, j.eta_end-j.start)))); }
+function jobAgo(j){ if(!j.stepAt) return ""; const s = Math.max(0, Math.round(Date.now()/1000 - j.stepAt)); return s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.floor(s/60)}m ago`; }
+// every second: tick the ETA, the "Xs ago", and the time-based bar in place (no repaint, so typing/dictation is untouched)
+setInterval(()=>{ for(const el of document.querySelectorAll(".job[data-job]")){ try{ const j = JSON.parse(el.dataset.job);
+  const e = el.querySelector(".jeta"), t = jobEta(j); if(e && e.textContent !== t) e.textContent = t;
+  const a = el.querySelector(".ago"), g = jobAgo(j); if(a && a.textContent !== g) a.textContent = g;
+  if(!j.total && j.eta_end){ const b = el.querySelector(".bar i"); if(b) b.style.width = jobTimePct(j)+"%"; } }catch{} } }, 1000);
+// while anything is running, pull the latest step every 3 seconds
+setInterval(()=>{ if(openId && D?.jobs?.length && !document.hidden && !holdStill()) refresh(true).catch(()=>{}); }, 3000);
 function renderConvo(keepScroll){
   const d = D; const c = MC[d.machine];
   const box = $(".msgs"); const atBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 60; const prev = box?.scrollTop;
@@ -352,7 +397,8 @@ function renderConvo(keepScroll){
   const mic = `<button class="micb${v?" "+v:""}" id="mic" title="${v==="live"?"Tap to send":"Tap to talk, tap again to send"}">${MIC_SVG}</button>`;
   const compose = `<div class="glass compose" style="--c:${c}"><textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}<button class="send" id="send">Send</button></div>`;
   const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>${d.kind==="dock"?`<button class="ghost" id="close" title="End this session">End</button>`:""}`;
-  const body = `${turns||`<div class="empty">Say what you want ${esc(d.label)} to do.</div>`}${ask}${notes}`;
+  const jobs = jobsHtml(d);
+  const body = `${turns||`<div class="empty">Say what you want ${esc(d.label)} to do.</div>`}${ask}${notes}${jobs}`;
   // Same chat already on screen: leave the message box alone. Rebuilding it under the cursor made Mac dictation
   // and typing lose their place and paste the same words twice.
   const cur = $(".convo"), curTa = $("#ta");
@@ -365,7 +411,7 @@ function renderConvo(keepScroll){
     if(holdStill()){ clearTimeout(renderConvo.later); renderConvo.later = setTimeout(()=>renderConvo(true), 600); return; }
     const ct = $(".c-top"); if(ct.innerHTML !== top) ct.innerHTML = top;
     // redraw only the pieces that changed, so typing never waits on a full repaint of the conversation
-    const pieces = turns ? turnHtml.concat([ask+notes]) : [body];
+    const pieces = turns ? turnHtml.concat([ask+notes+jobs]) : [body];
     const box = $(".msgs"); const kids = box.children;
     if(box.dataset.keyed !== "1"){ box.innerHTML = ""; box.dataset.keyed = "1"; }
     let changed = false;

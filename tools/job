@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Background-job board for the Claude Code status bar.
+
+  job start ID "what it's doing" [--total N] [--eta-min M] [--pid P]
+  job tick ID DONE [--label "new text"]
+  job done ID
+  job list
+
+Each job is ~/.claude/job-board/ID.json. The status bar shows a pulsing line per
+running job with progress and an ETA (from progress rate, or --eta-min)."""
+import json, os, sys, time
+D = os.path.expanduser("~/.claude/job-board")
+os.makedirs(D, exist_ok=True)
+
+def path(i): return os.path.join(D, i + ".json")
+def load(i):
+    try: return json.load(open(path(i)))
+    except Exception: return None
+def save(i, j):
+    j["updated"] = time.time(); tmp = path(i) + ".tmp"
+    json.dump(j, open(tmp, "w")); os.replace(tmp, path(i))
+def opt(args, name, cast=str):
+    if name in args:
+        k = args.index(name); v = cast(args[k + 1]); del args[k:k + 2]; return v
+    return None
+
+a = sys.argv[1:]
+if not a: print(__doc__); sys.exit(1)
+cmd = a.pop(0)
+if cmd == "start":
+    total, eta, pid = opt(a, "--total", int), opt(a, "--eta-min", float), opt(a, "--pid", int)
+    i, label = a[0], " ".join(a[1:]) or a[0]
+    save(i, {"label": label, "start": time.time(), "total": total, "done": 0,
+             "eta_end": time.time() + eta * 60 if eta else None, "pid": pid})
+elif cmd == "tick":
+    lbl = opt(a, "--label"); j = load(a[0]) or {"label": a[0], "start": time.time()}
+    j["done"] = int(a[1])
+    if lbl: j["label"] = lbl
+    save(a[0], j)
+elif cmd == "done":
+    try: os.remove(path(a[0]))
+    except FileNotFoundError: pass
+elif cmd == "list":
+    for f in sorted(os.listdir(D)):
+        if f.endswith(".json"): print(f[:-5], json.load(open(os.path.join(D, f))))

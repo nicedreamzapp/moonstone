@@ -522,13 +522,147 @@ function fullTurns(id) {
   if (p?.busy && (!turns.length || !turns[turns.length - 1].open)) turns.push({ i: turns.length, user: p.pendingText || null, answer: null, work: [], open: true });
   return turns;
 }
+// ---------- background jobs (10/4) ----------
+// Long tasks an agent kicks off on this machine register themselves in ~/.claude/job-board
+// (helper: ~/.claude/bin/job). Every open chat on this machine shows them as a pulsing card
+// with progress + ETA, so Matt can see work is happening between replies.
+const JOB_DIR = path.join(HOME, ".claude", "job-board");
+function readJobs() {
+  let names = []; try { names = fs.readdirSync(JOB_DIR).filter(f => f.endsWith(".json")); } catch { return []; }
+  const now = Date.now() / 1000, out = [];
+  for (const f of names) {
+    let j; try { j = JSON.parse(fs.readFileSync(path.join(JOB_DIR, f), "utf8")); } catch { continue; }
+    if (j.pid && !alive(j.pid)) continue;
+    if (now - (j.updated || now) > 6 * 3600) continue;
+    out.push({ id: f.slice(0, -5), label: j.label, start: j.start, total: j.total || null, done: j.done || 0, eta_end: j.eta_end || null });
+  }
+  return out.sort((a, b) => (a.start || 0) - (b.start || 0));
+}
+// Background work Claude starts inside a chat (Agent calls, run_in_background Bash, Monitors) is read
+// straight from that chat's transcript: started when the tool_use lands, finished when its
+// <task-notification> says completed/failed/killed. The live line is the agent's latest step (from its
+// subagents/agent-<id>.jsonl) or the last line of the command's output file. ETA = a "~5m" hint in the
+// description, else the median of how long this kind of task took before (bg-history.json), else a default.
+const BG_HIST_FILE = path.join(__dirname, "bg-history.json");
+let bgHist = {}; try { bgHist = JSON.parse(fs.readFileSync(BG_HIST_FILE, "utf8")); } catch {}
+bgHist.d = bgHist.d || {}; bgHist.seen = bgHist.seen || [];
+const bgScan = new Map(); // transcript path -> {off, rest, tasks: Map(toolUseId -> task)}
+const BG_DEFAULT = { agent: 180, bash: 120, monitor: 300 };
+function bgEtaSecs(t) {
+  const m = /~\s*(\d+(?:\.\d+)?)\s*(h|hr|hours?|m|min|minutes?|s|sec)\b/i.exec(t.label || "");
+  if (m) { const n = +m[1], u = m[2][0].toLowerCase(); return u === "h" ? n * 3600 : u === "m" ? n * 60 : n; }
+  const arr = bgHist.d[t.kind] || [];
+  if (arr.length >= 3) { const a = [...arr].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; }
+  return BG_DEFAULT[t.kind] || 120;
+}
+function bgRecord(t, endMs) {
+  if (bgHist.seen.includes(t.id)) return;
+  const secs = (endMs - t.startMs) / 1000; if (!(secs > 1 && secs < 6 * 3600)) return;
+  (bgHist.d[t.kind] = bgHist.d[t.kind] || []).push(Math.round(secs));
+  if (bgHist.d[t.kind].length > 30) bgHist.d[t.kind].shift();
+  bgHist.seen.push(t.id); if (bgHist.seen.length > 300) bgHist.seen.splice(0, 100);
+  try { fs.writeFileSync(BG_HIST_FILE, JSON.stringify(bgHist)); } catch {}
+}
+function textOf(c) { return typeof c === "string" ? c : Array.isArray(c) ? c.map(x => x?.text || "").join("\n") : ""; }
+function bgScanFile(tp) {
+  let st; try { st = fs.statSync(tp); } catch { return null; }
+  let e = bgScan.get(tp);
+  if (!e || st.size < e.off) { e = { off: 0, rest: "", tasks: new Map() }; bgScan.set(tp, e); }
+  if (st.size > e.off) {
+    const fd = fs.openSync(tp, "r"); const buf = Buffer.alloc(st.size - e.off); fs.readSync(fd, buf, 0, buf.length, e.off); fs.closeSync(fd);
+    e.off = st.size; const lines = (e.rest + buf.toString("utf8")).split("\n"); e.rest = lines.pop();
+    for (const line of lines) {
+      if (!line.includes("tool_use") && !line.includes("task-notification") && !line.includes("in background") && !line.includes("moved to the background")) continue;
+      let j; try { j = JSON.parse(line); } catch { continue; }
+      if (j.isSidechain) continue;
+      const ts = Date.parse(j.timestamp || "") || Date.now();
+      const content = j.message?.content;
+      if (j.type === "assistant" && Array.isArray(content)) {
+        for (const c of content) {
+          if (c.type !== "tool_use") continue;
+          const inp = c.input || {};
+          if (c.name === "Agent" && inp.run_in_background !== false)
+            e.tasks.set(c.id, { id: c.id, kind: "agent", label: inp.description || "Background agent", startMs: ts, open: true });
+          else if (c.name === "Bash" && inp.run_in_background)
+            e.tasks.set(c.id, { id: c.id, kind: "bash", label: inp.description || "Background command", startMs: ts, open: true });
+          else if (c.name === "Monitor")
+            e.tasks.set(c.id, { id: c.id, kind: "monitor", label: "Watching: " + (inp.description || "a background job"), startMs: ts, open: true });
+          else if (c.name === "Bash") e.tasks.set(c.id, { id: c.id, kind: "bash", label: inp.description || "Command", startMs: ts, open: false, pending: true });
+        }
+      }
+      if (j.type === "user" && Array.isArray(content)) {
+        for (const c of content) {
+          if (c.type !== "tool_result") continue; const t = e.tasks.get(c.tool_use_id); if (!t) continue;
+          const txt = textOf(c.content);
+          const of = /Output is being written to: (\S+?)\.?(?:\s|$)/.exec(txt) || /output_file: (\S+)/.exec(txt);
+          if (t.pending) { delete t.pending; if (/moved to the background/.test(txt)) t.open = true; else { e.tasks.delete(c.tool_use_id); continue; } }
+          if (of) t.outFile = of[1];
+          const aid = /agentId: (\w+)/.exec(txt); if (aid) t.agentId = aid[1];
+          if (/Async agent launched|running in background|moved to the background|Monitor started/.test(txt) === false && t.kind !== "agent") { t.open = false; }
+        }
+      }
+      const raw = j.type === "user" ? textOf(content) : (j.type === "queue-operation" ? j.content || "" : "");
+      if (raw.includes("<task-notification>")) {
+        const id = /<tool-use-id>([^<]+)</.exec(raw)?.[1], status = /<status>([^<]+)</.exec(raw)?.[1];
+        const t = id && e.tasks.get(id);
+        if (t && t.open && /completed|failed|killed|stopped|cancel|timeout/i.test(status || "")) { t.open = false; if (/completed/i.test(status)) bgRecord(t, ts); }
+      }
+    }
+    for (const [k, t] of e.tasks) if (!t.open && !t.pending) e.tasks.delete(k);
+  }
+  return e;
+}
+function tailLines(file, bytes = 16384) {
+  try { const st = fs.statSync(file); const n = Math.min(bytes, st.size); const fd = fs.openSync(file, "r"); const b = Buffer.alloc(n);
+    fs.readSync(fd, b, 0, n, st.size - n); fs.closeSync(fd); return { text: b.toString("utf8"), mtime: st.mtimeMs }; } catch { return null; }
+}
+function agentStep(sub) {
+  const t = tailLines(sub, 65536); if (!t) return null;
+  const lines = t.text.split("\n").reverse();
+  for (const l of lines) {
+    let j; try { j = JSON.parse(l); } catch { continue; }
+    const c = j.message?.content; if (j.type !== "assistant" || !Array.isArray(c)) continue;
+    for (const x of [...c].reverse()) {
+      if (x.type === "tool_use") { const i = x.input || {};
+        const what = i.query ? `Searching: ${i.query}` : i.url ? `Reading ${String(i.url).replace(/^https?:\/\//, "").slice(0, 70)}`
+          : i.description ? i.description : i.file_path ? `Reading ${path.basename(i.file_path)}` : i.pattern ? `Searching files for ${i.pattern}` : i.command ? `Running ${String(i.command).slice(0, 60)}` : x.name;
+        return { line: what, at: t.mtime }; }
+      if (x.type === "text" && x.text?.trim()) return { line: "Writing up what it found", at: t.mtime };
+    }
+  }
+  return { line: "Getting started", at: t.mtime };
+}
+function outStep(file) {
+  const t = tailLines(file, 8192); if (!t) return null;
+  const segs = t.text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map(x => x.trim()).filter(Boolean);
+  return { line: segs.length ? segs[segs.length - 1].slice(0, 110) : "Working (no output yet)", at: t.mtime };
+}
+function bgTasks(tp) {
+  if (!tp) return [];
+  const e = bgScanFile(tp); if (!e) return [];
+  const subDir = tp.replace(/\.jsonl$/, ""), out = [];
+  for (const t of e.tasks.values()) {
+    if (!t.open) continue;
+    let step = null;
+    if (t.kind === "agent" && t.agentId) step = agentStep(path.join(subDir, "subagents", `agent-${t.agentId}.jsonl`));
+    else if (t.outFile) step = outStep(t.outFile);
+    const eta = bgEtaSecs(t);
+    out.push({ id: t.id, kind: t.kind, label: t.label, start: t.startMs / 1000, eta_end: t.startMs / 1000 + eta, total: null, done: 0,
+      step: step?.line || null, stepAt: step?.at ? step.at / 1000 : null });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+let jobSig = "";
+setInterval(() => { const sig = JSON.stringify(readJobs()); if (sig !== jobSig) { jobSig = sig; broadcast(); } }, 2000);
+
 function sessionDetail(id) {
   if (id.startsWith("t:")) {
     const sid = id.slice(2); const tp = findTranscript(sid); if (!tp) return null;
     const f = readFileModel(tp); const lab = labelFor(f.model.cwd);
     const live = liveTerminalSessions().some(x => x.sessionId === sid);
     return { id, kind: "terminal", label: lab.label, color: lab.color, title: f.model.title, cwd: f.model.cwd,
-      live, turns: lean(fullTurns(id)) };
+      live, turns: lean(fullTurns(id)), jobs: bgTasks(tp).concat(readJobs()) };
   }
   const s = state.sessions.find(x => x.id === id); if (!s || s.hidden) return null;   // ended = gone from every window
   const p = procs.get(id);
@@ -537,7 +671,7 @@ function sessionDetail(id) {
   const turns = lean(fullTurns(id));
   return { id, kind: "dock", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd,
     busy: !!p?.busy, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
-    err: p?.err || deadErr.get(id) || null, turns };
+    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()) };
 }
 
 // ---------- SSE ----------

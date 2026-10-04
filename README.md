@@ -46,6 +46,7 @@ It is one Node file and one HTML file. No npm dependencies, no build step, no cl
 
 - **Permission prompts** arrive as an Allow / Don't card. Moonstone runs Claude Code with `--permission-prompt-tool stdio`, so it answers the real prompt; nothing is auto-approved. Questions Claude asks with options (`AskUserQuestion`) show up as buttons.
 - **The work folds away.** Each answer shows the final text; the tool calls behind it sit under a "Show the work · 5 steps · 2m 22s" bar. Older turns load their work only when you open it.
+- **Background work stays visible.** When Claude starts a background agent, a `run_in_background` command or a monitor, a card pinned to the bottom of the chat shows it until it finishes. The card has a pulsing dot, its latest step ("Reading huggingface.co/...", or the last line of the command's output) with how long ago that changed, a progress bar, and an ETA with a finish time that ticks every second. Moonstone reads all of this from the session transcript, so nothing has to be registered. The ETA comes from a `~5m` hint in the task description if there is one, otherwise from the median time of past tasks of the same kind (kept in `bg-history.json`). A long script running outside a session can report its own progress with `tools/job start <id> "what it's doing" --total N`, `tools/job tick <id> <done>` and `tools/job done <id>`.
 - **End** stops the session's process and removes it from every open window, on every machine.
 - The page reloads itself when `public/index.html` changes, but waits until your message box is empty.
 
@@ -198,6 +199,7 @@ server.js              the whole backend: sessions, peers, voice, HTTP + SSE
 public/index.html      the whole frontend: no framework, no build
 config.example.json    a starting config
 tools/demo-server.js   the UI with invented data, for trying it out and screenshots
+tools/job              lets a long-running script show its progress on the background-jobs card
 mac/                   Moonstone Dictate helper (Swift) and build script
 icon/                  app icons and the Python scripts that draw them
 docs/                  the project website (GitHub Pages)

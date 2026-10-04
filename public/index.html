@@ -93,6 +93,15 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .badge.need{color:#ffd28c;background:rgba(255,171,61,.16);border:1px solid rgba(255,171,61,.55);box-shadow:0 0 16px rgba(255,171,61,.35);animation:glow 1.6s ease-in-out infinite}
 .badge.need::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--need)}
 .badge.ans{color:#bfe0ff;background:rgba(74,168,255,.14);border:1px solid rgba(74,168,255,.45)}
+/* your turn (10/4): the latest answer asked Matt something */
+.badge.turn{color:#d6ecff;background:rgba(74,168,255,.2);border:1px solid rgba(74,168,255,.7);box-shadow:0 0 16px rgba(74,168,255,.4);animation:glow 1.6s ease-in-out infinite}
+.badge.turn::before{content:"";width:7px;height:7px;border-radius:50%;background:#4aa8ff}
+.s-yourturn .dot{background:#4aa8ff;box-shadow:0 0 0 3px rgba(74,168,255,.25),0 0 14px #4aa8ff;animation:beat 1.2s infinite}
+.yourturn{position:sticky;bottom:0;z-index:3;margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(8,22,40,.9);border:1px solid rgba(74,168,255,.7);box-shadow:0 0 22px rgba(74,168,255,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:turnglow 1.8s ease-in-out infinite}
+.yourturn b{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.08em;color:#4aa8ff;margin-bottom:4px}
+.yourturn b::before{content:"";width:9px;height:9px;border-radius:50%;background:#4aa8ff;animation:jobpulse 1.4s ease-out infinite;box-shadow:0 0 0 0 rgba(74,168,255,.7)}
+.yourturn div{font-size:13.5px;color:#e6f2ff;line-height:1.4}
+@keyframes turnglow{50%{box-shadow:0 0 34px rgba(74,168,255,.6)}}
 .badge.err{color:#ffc2cc;background:rgba(255,95,122,.14);border:1px solid rgba(255,95,122,.45)}
 @keyframes glow{50%{box-shadow:0 0 26px rgba(255,171,61,.6)}}
 @keyframes beat{50%{opacity:.55}}
@@ -291,6 +300,7 @@ function toast(t){ let e=$("#toast"); if(!e){ e=document.createElement("div"); e
 // ---------- list ----------
 function cardHtml(s){
   const st = s.status==="needs" ? `<span class="badge need">NEEDS YOU</span>`
+    : s.status==="yourturn" ? `<span class="badge turn" title="${esc(s.ask||"")}">YOUR TURN</span>`
     : s.status==="answered" ? `<span class="badge ans">NEW ANSWER</span>`
     : s.status==="error" ? `<span class="badge err">STOPPED</span>`
     : s.status==="cooking" ? `<span class="st">${s.kind==="terminal"?"cooking · terminal":"cooking"}</span>`
@@ -298,10 +308,14 @@ function cardHtml(s){
   return `<button class="card s-${s.status}" data-open="${esc(s.id)}">
     <span class="dot"></span>
     <span class="c-name">${esc(s.label)}${s.title?`<small>${esc(s.title)}</small>`:""}</span>${st}
-    <span class="c-last">${esc(s.last)}</span>
+    <span class="c-last">${esc(s.status==="yourturn" && s.ask ? "Waiting on you: " + s.ask : s.last)}</span>
     <span class="end${armed===s.id?" armed":""}" role="button" tabindex="0" data-end="${esc(s.id)}" title="End this session">${armed===s.id?"End it?":"×"}</span></button>`;
 }
+// tab title says when something is waiting on Matt, so it shows even when the window is in the background
+const baseTitle = document.title;
+function turnTitle(on){ const t = on ? "● Your turn · " + baseTitle : baseTitle; if(document.title !== t) document.title = t; }
 function renderList(){
+  turnTitle(S.sessions.some(x=>x.status==="yourturn" || x.status==="needs"));
   const m = S.machines.map(m=>{
     const GB = b => Math.round(b/1073741824);
     const memPct = m.mem ? Math.round(m.mem.used/m.mem.total*100) : null;
@@ -397,7 +411,8 @@ function renderConvo(keepScroll){
   const mic = `<button class="micb${v?" "+v:""}" id="mic" title="${v==="live"?"Tap to send":"Tap to talk, tap again to send"}">${MIC_SVG}</button>`;
   const compose = `<div class="glass compose" style="--c:${c}"><textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}<button class="send" id="send">Send</button></div>`;
   const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>${d.kind==="dock"?`<button class="ghost" id="close" title="End this session">End</button>`:""}`;
-  const jobs = jobsHtml(d);
+  const jobs = (d.ask && !d.busy && !d.perm ? `<div class="yourturn"><b>YOUR TURN</b><div>${esc(d.ask)}</div></div>` : "") + jobsHtml(d);
+  turnTitle(!!(d.ask && !d.busy && !d.perm));
   const body = `${turns||`<div class="empty">Say what you want ${esc(d.label)} to do.</div>`}${ask}${notes}${jobs}`;
   // Same chat already on screen: leave the message box alone. Rebuilding it under the cursor made Mac dictation
   // and typing lose their place and paste the same words twice.

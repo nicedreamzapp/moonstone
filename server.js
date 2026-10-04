@@ -477,9 +477,10 @@ function listSessions() {
     const tp = findTranscript(s.sessionId);
     const f = tp ? readFileModel(tp) : null;
     const m = f?.model;
-    const status = p?.perm ? "needs" : p?.busy ? "cooking" : (p?.err || deadErr.get(s.id)) ? "error" : p?.unread ? "answered" : "idle";
+    const ask = !p?.busy && !p?.perm ? askOf(lastAnswer(m)) : null;
+    const status = p?.perm ? "needs" : p?.busy ? "cooking" : (p?.err || deadErr.get(s.id)) ? "error" : ask ? "yourturn" : p?.unread ? "answered" : "idle";
     out.push({ id: s.id, kind: "dock", label: s.label, color: s.color, title: m?.title || null,
-      status, last: lastLine(m), updated: f?.mtime || s.created, running: !!p });
+      status, ask, last: lastLine(m), updated: f?.mtime || s.created, running: !!p });
   }
   // Terminal sessions: only ones whose Claude process is actually running right now.
   // Claude Code writes ~/.claude/sessions/<pid>.json for every live session.
@@ -495,7 +496,27 @@ function listSessions() {
   out.sort((a, b) => rank(a) - rank(b) || b.updated - a.updated);
   return out;
 }
-const rank = s => ({ needs: 0, error: 1, answered: 2, cooking: 3, idle: 4 }[s.status] ?? 5);
+const rank = s => ({ needs: 0, yourturn: 0.5, error: 1, answered: 2, cooking: 3, idle: 4 }[s.status] ?? 5);
+// "Your turn" (10/4): when the latest answer asks Matt something, pull out that question so the list and
+// the chat can say plainly that the session is waiting on him. Last paragraph with a "?" -> its last question.
+function lastAnswer(m) {
+  if (!m || !m.turns.length) return "";
+  const t = m.turns[m.turns.length - 1], st = t.steps || [];
+  for (let j = st.length - 1; j >= 0; j--) if (st[j].k === "text" && st[j].text.trim()) return st[j].text;
+  return "";
+}
+function askOf(text) {
+  if (!text) return null;
+  const paras = text.trim().split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+  for (const para of paras.slice(-2).reverse()) {
+    if (!para.includes("?")) continue;
+    const plain = para.replace(/[*_`#>]/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\s+/g, " ");
+    const qs = plain.match(/[^.!?]*\?/g); if (!qs) continue;
+    const q = qs[qs.length - 1].trim(); if (q.length < 8) continue;
+    return q.length > 240 ? "…" + q.slice(-240) : q;
+  }
+  return null;
+}
 function lastLine(m) {
   if (!m) return "";
   for (let i = m.turns.length - 1; i >= 0; i--) {
@@ -671,7 +692,8 @@ function sessionDetail(id) {
   const turns = lean(fullTurns(id));
   return { id, kind: "dock", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd,
     busy: !!p?.busy, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
-    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()) };
+    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()),
+    ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null };
 }
 
 // ---------- SSE ----------

@@ -1012,6 +1012,9 @@ const server = http.createServer(async (req, res) => {
         const s = takeSpare(l) || { id: crypto.randomUUID().slice(0, 8), sessionId: null, cwd: l.cwd, label: l.label, mode: l.mode, color: l.color, created: Date.now() };
         state.sessions.push(s); saveState(); setTimeout(fillSpares, 1000);
         if (b.text) send(s, b.text);
+        // "opening": a shell command whose output is the chat's first message (Story Forge's briefing,
+        // 2026-10-05). bash on macOS/Linux, PowerShell on Windows (no /bin/bash there).
+        else if (l.opening) execFile(WIN ? "powershell" : "/bin/bash", WIN ? ["-NoProfile", "-Command", String(l.opening)] : ["-c", String(l.opening)], { cwd: l.cwd, timeout: 60000, windowsHide: true }, (e, out) => { const t = String(out || "").trim(); if (t) send(s, t); });
         broadcast(); return json(res, 200, { id: s.id });
       }
       if (url.pathname === "/api/continue") { // resume a terminal transcript inside the dock

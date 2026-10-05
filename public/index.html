@@ -492,7 +492,7 @@ async function usageTick(){
     const u = await api("/api/usage"); const el = $("#usage"); if(!el) return;
     if(!u || !u.limits || !u.limits.length){ el.innerHTML=""; document.body.classList.remove("has-usage"); return; }
     const weekReset = (u.limits.find(x=>x.kind==="weekly_all")||{}).resets_at;
-    el.innerHTML = u.limits.map(x=>{
+    el.innerHTML = u.limits.filter(x=>x.kind==="session"||x.kind==="weekly_all").map(x=>{   // 10/5 Matt: no Fable line
       const name = x.kind==="session" ? "5h" : x.kind==="weekly_all" ? "Wk" : (x.scope?.model?.display_name || x.kind);
       const p = Math.round(x.percent ?? 0), col = p>=85?"var(--err)":p>=70?"var(--need)":"#3fd1a0";
       const sameAsWeek = x.kind!=="weekly_all" && x.kind!=="session" && x.resets_at && weekReset && Math.abs(new Date(x.resets_at)-new Date(weekReset))<120000;

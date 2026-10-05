@@ -776,6 +776,24 @@ for (const peer of CONFIG.peers) {
   connect();
 }
 
+// Claude plan usage for the bar at the top (Matt 10/5): 5-hour and weekly percent + reset times, the same
+// numbers claude.ai/settings/usage shows. A Mac reads it with ~/Scripts/claude-usage/usage.py (Claude Code's
+// own keychain login); a machine without it asks its peers. Cached a minute.
+let usageCache = { at: 0, body: null };
+async function claudeUsage(fromPeer) {
+  if (usageCache.body && Date.now() - usageCache.at < 60000) return usageCache.body;
+  const sc = path.join(HOME, "Scripts", "claude-usage", "usage.py");
+  let body = null;
+  if (!WIN && fs.existsSync(sc)) body = await new Promise(ok => execFile("/usr/bin/python3", [sc], { timeout: 15000 }, (e, out) => {
+    try { const j = JSON.parse(out); ok(j.five_hour ? { five: j.five_hour, week: j.seven_day, limits: j.limits || [], at: Date.now() } : null); } catch { ok(null); } }));
+  if (!body && !fromPeer) for (const p of CONFIG.peers) {
+    if (!p.url) continue;
+    const t = await getJSON(p.url + "/api/usage?peer=1", 8000);
+    try { const j = JSON.parse(t); if (j.five) { body = j; break; } } catch {}
+  }
+  if (body) usageCache = { at: Date.now(), body };
+  return body || usageCache.body;
+}
 // every machine's sessions and launchers in one list, with the best machine marked per launcher
 async function buildState() {
       const local = localState();
@@ -895,6 +913,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(fs.readFileSync(path.join(__dirname, "public", "index.html")));
     }
     if (req.method === "GET" && url.pathname === "/api/local") return json(res, 200, localState());
+    if (req.method === "GET" && url.pathname === "/api/usage") return json(res, 200, (await claudeUsage(url.searchParams.get("peer") === "1")) || { none: true });
     if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, await buildState());
     if (req.method === "GET" && url.pathname === "/api/clients") return json(res, 200, { local: [...clients].filter(c => c.local).length });
     // anything addressed to "<peer>~<id>" goes to that machine's dock

@@ -44,6 +44,14 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 @keyframes a5{to{transform:translate(-15%,10%) rotate(40deg) scale(1.1)}}
 @keyframes hue{to{filter:blur(70px) saturate(1.4) brightness(.5) hue-rotate(-35deg)}}
 
+#usage{position:relative;z-index:2;height:24px;display:flex;align-items:center;justify-content:center;gap:16px;font-size:11.5px;color:var(--fg);opacity:.85;white-space:nowrap;overflow:hidden;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.06);background:rgba(0,0,0,.18)}
+#usage:empty{display:none}
+#usage .u{display:inline-flex;align-items:center;gap:5px}
+#usage .u b{font-weight:600}
+#usage .ub{width:34px;height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;display:inline-block}
+#usage .ub i{display:block;height:100%}
+#usage .ur{opacity:.6}
+body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .app{position:relative;z-index:1;height:calc(100dvh / 1.2);zoom:1.2;display:flex;flex-direction:column;padding:10px;gap:10px}
 .glass{background:var(--glass);border:1px solid var(--rim);border-radius:18px;backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 10px 30px rgba(0,0,0,.25)}
 
@@ -217,6 +225,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 </head>
 <body>
 <div class="aurora"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<div id="usage"></div>
 <div class="app" id="app"></div>
 <script>
 const $ = s => document.querySelector(s);
@@ -467,6 +476,33 @@ const pointerDone = ()=>{ if(!pointerHeld) return; setTimeout(()=>{ pointerHeld 
   if(refreshWanted !== null){ const k = refreshWanted; refreshWanted = null; refresh(k).catch(()=>{}); } }, 60); };
 document.addEventListener("pointerup", pointerDone, true);
 document.addEventListener("pointercancel", pointerDone, true);
+// Claude plan usage bar (Matt 10/5): "5h 25% · 6a (2h26m)   Wk 66% · Wed 8a   Fable 0%" — the
+// claude.ai/settings/usage numbers, abbreviated, always on top. Outside #app so rebuilds never touch it.
+function usageWhen(iso, withLeft){
+  const d = new Date(Math.round(new Date(iso).getTime()/60000)*60000), now = new Date();
+  let h = d.getHours(), m = d.getMinutes(); const ap = h<12?"a":"p"; h = h%12||12;
+  const t = h + (m?":"+String(m).padStart(2,"0"):"") + ap;
+  const day = d.toDateString()===now.toDateString() ? "" : d.toLocaleDateString([], {weekday:"short"})+" ";
+  if(!withLeft) return day+t;
+  const left = Math.max(0, Math.round((d-now)/60000)); const lh = Math.floor(left/60), lm = left%60;
+  return `${day}${t} (${lh?lh+"h":""}${lm}m)`;
+}
+async function usageTick(){
+  try{
+    const u = await api("/api/usage"); const el = $("#usage"); if(!el) return;
+    if(!u || !u.limits || !u.limits.length){ el.innerHTML=""; document.body.classList.remove("has-usage"); return; }
+    const weekReset = (u.limits.find(x=>x.kind==="weekly_all")||{}).resets_at;
+    el.innerHTML = u.limits.map(x=>{
+      const name = x.kind==="session" ? "5h" : x.kind==="weekly_all" ? "Wk" : (x.scope?.model?.display_name || x.kind);
+      const p = Math.round(x.percent ?? 0), col = p>=85?"var(--err)":p>=70?"var(--need)":"#3fd1a0";
+      const sameAsWeek = x.kind!=="weekly_all" && x.kind!=="session" && x.resets_at && weekReset && Math.abs(new Date(x.resets_at)-new Date(weekReset))<120000;
+      const when = !x.resets_at || sameAsWeek ? "" : `<span class="ur">· ${usageWhen(x.resets_at, x.kind==="session")}</span>`;
+      return `<span class="u" title="${esc(name)} ${p}% used${x.resets_at?", resets "+new Date(x.resets_at).toLocaleString():""}">${esc(name)} <span class="ub"><i style="width:${Math.min(100,p)}%;background:${col}"></i></span><b>${p}%</b>${when}</span>`;
+    }).join("");
+    document.body.classList.add("has-usage");
+  }catch{}
+}
+usageTick(); setInterval(usageTick, 60000);
 async function refresh(keepScroll=true){
   if(pointerHeld){ refreshWanted = refreshWanted === null ? keepScroll : (refreshWanted && keepScroll); return; }
   if(openId){ if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(openId)); if(d.error){ openId=null; return refresh(); } D=d; renderConvo(keepScroll); }

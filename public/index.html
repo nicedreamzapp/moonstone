@@ -458,7 +458,17 @@ function holdStill(){
 function autosize(t){ t.style.height="auto"; t.style.height=Math.min(180,t.scrollHeight)+"px"; }
 
 // ---------- data ----------
+// 10/5: Matt had to press buttons several times whenever anything was working. While a chat runs the page
+// rebuilds about twice a second; a rebuild landing between finger-down and finger-up replaced the button
+// under his finger, so the click never fired. Hold rebuilds while a finger or mouse is down, then catch up.
+let pointerHeld = false, refreshWanted = null;
+document.addEventListener("pointerdown", ()=>{ pointerHeld = true; }, true);
+const pointerDone = ()=>{ if(!pointerHeld) return; setTimeout(()=>{ pointerHeld = false;
+  if(refreshWanted !== null){ const k = refreshWanted; refreshWanted = null; refresh(k).catch(()=>{}); } }, 60); };
+document.addEventListener("pointerup", pointerDone, true);
+document.addEventListener("pointercancel", pointerDone, true);
 async function refresh(keepScroll=true){
+  if(pointerHeld){ refreshWanted = refreshWanted === null ? keepScroll : (refreshWanted && keepScroll); return; }
   if(openId){ if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(openId)); if(d.error){ openId=null; return refresh(); } D=d; renderConvo(keepScroll); }
   else { S = await api("/api/state"); learnMachines(S); renderList(); }
 }

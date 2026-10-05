@@ -786,6 +786,15 @@ async function claudeUsage(fromPeer) {
   let body = null;
   if (!WIN && fs.existsSync(sc)) body = await new Promise(ok => execFile("/usr/bin/python3", [sc], { timeout: 15000 }, (e, out) => {
     try { const j = JSON.parse(out); ok(j.five_hour ? { five: j.five_hour, week: j.seven_day, limits: j.limits || [], at: Date.now() } : null); } catch { ok(null); } }));
+  // the PC (no python, no keychain): Claude Code keeps its login in ~/.claude/.credentials.json there
+  const cred = path.join(HOME, ".claude", ".credentials.json");
+  if (!body && fs.existsSync(cred)) body = await new Promise(ok => {
+    let tok; try { tok = JSON.parse(fs.readFileSync(cred, "utf8")).claudeAiOauth.accessToken; } catch { return ok(null); }
+    const r = require("https").get("https://api.anthropic.com/api/oauth/usage", { timeout: 10000,
+      headers: { Authorization: "Bearer " + tok, "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code" } }, x => {
+      let t = ""; x.on("data", c => (t += c)); x.on("end", () => { try { const j = JSON.parse(t); ok(j.five_hour ? { five: j.five_hour, week: j.seven_day, limits: j.limits || [], at: Date.now() } : null); } catch { ok(null); } }); });
+    r.on("error", () => ok(null)); r.on("timeout", () => { r.destroy(); ok(null); });
+  });
   if (!body && !fromPeer) for (const p of CONFIG.peers) {
     if (!p.url) continue;
     const t = await getJSON(p.url + "/api/usage?peer=1", 8000);

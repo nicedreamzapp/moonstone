@@ -354,6 +354,8 @@ async function ensureServer(l, onNote) {
     const child = spawn(l.serve.cmd, l.serve.args || [], { cwd: path.dirname(l.serve.cmd), stdio: "ignore", windowsHide: true, detached: !WIN });
     sv = { child, lastUsed: Date.now() }; servers.set(l.id, sv);
     child.on("exit", () => { if (servers.get(l.id) === sv) servers.delete(l.id); });
+    // a CPU model pegs every core it is given; idle priority keeps the mouse and Brave responsive
+    if (WIN && child.pid) spawn("powershell", ["-NoProfile", "-Command", `(Get-Process -Id ${child.pid}).PriorityClass = 'Idle'`], { stdio: "ignore", windowsHide: true });
   }
   for (let i = 0; i < 180; i++) { if (await getJSON(health)) return true; await new Promise(r => setTimeout(r, 1000)); if (sv.child.exitCode !== null) return false; }
   return false;
@@ -364,8 +366,8 @@ async function sendApi(s, text) {
   procs.set(s.id, p); deadErr.delete(s.id);
   s.log = s.log || []; s.log.push({ user: text, answer: "", ts: Date.now() });
   const turn = s.log[s.log.length - 1];
-  p.busy = true; p.unread = false; saveState(); broadcast(s.id);
-  const fail = msg => { turn.answer = msg; turn.end = Date.now(); p.busy = false; deadErr.set(s.id, msg); saveState(); broadcast(s.id); };
+  p.busy = true; p.unread = false; p.liveTok = 0; saveState(); broadcast(s.id);
+  const fail = msg => { if (turn.end) return; turn.answer = msg; turn.end = Date.now(); p.busy = false; p.req = null; deadErr.set(s.id, msg); saveState(); broadcast(s.id); };
   if (!(await ensureServer(l, note => { turn.answer = note; broadcast(s.id); }))) return fail("The model server didn't start.");
   turn.answer = "";
   const sv = servers.get(l.id); if (sv) sv.lastUsed = Date.now();
@@ -379,14 +381,22 @@ async function sendApi(s, text) {
       buf += c; const lines = buf.split("\n"); buf = lines.pop();
       for (const ln of lines) {
         if (!ln.startsWith("data: ")) continue; const d = ln.slice(6).trim(); if (d === "[DONE]") continue;
-        try { const j = JSON.parse(d); turn.answer += j.choices?.[0]?.delta?.content || ""; } catch {}
+        try {
+          const j = JSON.parse(d), x = j.choices?.[0]?.delta || {};
+          // thinking arrives as reasoning_content: count it so the token meter moves while nothing is shown yet
+          if (x.content || x.reasoning_content || x.reasoning) p.liveTok = (p.liveTok || 0) + 1;
+          if (j.usage?.completion_tokens) p.liveTok = j.usage.completion_tokens;
+          turn.answer += x.content || "";
+        } catch {}
       }
       if (Date.now() - last > 300) { last = Date.now(); broadcast(s.id); }
     });
-    res.on("end", () => { turn.answer = turn.answer.replace(/^\s+/, ""); turn.end = Date.now(); p.busy = false; p.unread = true; if (sv) sv.lastUsed = Date.now(); saveState(); broadcast(s.id); });
+    res.on("end", () => { if (turn.end) return; turn.answer = turn.answer.replace(/^\s+/, "") || "(no answer)"; turn.tok = p.liveTok || 0; turn.end = Date.now(); p.busy = false; p.req = null; p.unread = true; if (sv) sv.lastUsed = Date.now(); saveState(); broadcast(s.id); });
   });
+  p.req = req; p.stop = () => { req.destroy(); fail((turn.answer ? turn.answer + "\n\n" : "") + "(stopped)"); deadErr.delete(s.id); };
+  req.setTimeout(180e3, () => { req.destroy(); fail("The model went quiet for 3 minutes, so I stopped it."); });
   req.on("error", e => fail("Lost the model server: " + e.message));
-  req.end(JSON.stringify({ ...(l.model ? { model: l.model } : {}), messages, stream: true, temperature: 0.7 }));
+  req.end(JSON.stringify({ ...(l.model ? { model: l.model } : {}), messages, stream: true, temperature: 0.7, stream_options: { include_usage: true } }));
 }
 setInterval(() => {
   for (const [id, sv] of servers) {
@@ -1089,7 +1099,7 @@ const server = http.createServer(async (req, res) => {
         broadcast(s.id); return json(res, 200, { ok: true });
       }
       if (parts[3] === "close" && s.kind === "api") { s.hidden = true; procs.delete(s.id); saveState(); broadcast(); return json(res, 200, { ok: true }); }
-      if (parts[3] === "stop" && s.kind === "api") return json(res, 200, { ok: true });
+      if (parts[3] === "stop" && s.kind === "api") { if (p?.stop && p.busy) p.stop(); return json(res, 200, { ok: true }); }
       if (parts[3] === "stop" && s.kind === "pipe") { if (p) killTree(p, "SIGINT"); return json(res, 200, { ok: true }); }
       if (parts[3] === "close" && s.kind === "pipe") { if (p) killTree(p); s.hidden = true; saveState(); broadcast(); return json(res, 200, { ok: true }); }
       if (parts[3] === "stop") {

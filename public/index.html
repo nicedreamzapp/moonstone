@@ -188,6 +188,7 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .step details[open] summary::after{content:""}
 .step .out{margin:4px 0 4px 12px;color:#8f95bd;max-height:260px;overflow:auto;white-space:pre-wrap}
 .step.bad{color:#ff9fb0}
+.sofar{opacity:.72;margin-bottom:8px}
 .live{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px}
 .live .dot{width:9px;height:9px;background:var(--ok);box-shadow:0 0 10px var(--ok);animation:beat 1.2s infinite}
 .live-line{font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -401,7 +402,10 @@ function renderConvo(keepScroll){
     let h = t.user ? `<div class="u">${esc(t.user)}</div>` : "";
     if(t.open){
       const lastStep = [...t.work].reverse().find(w=>w.k==="tool");
-      h += `<div><div class="live"><span class="dot"></span>Working…<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
+      // show what it has written so far (Claude's lines between tools, a local model's streaming text);
+      // the finished answer replaces it when the turn closes
+      const sofar = (t.work||[]).filter(w=>w.k==="text"&&w.text.trim()).map(w=>w.text).concat(t.answer?[t.answer]:[]);
+      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
     } else if(t.answer || t.hasWork || t.work?.length){
       h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}</div>`;
     }

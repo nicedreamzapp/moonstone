@@ -432,7 +432,7 @@ function renderConvo(keepScroll){
     // or words are arriving; catch up after.
     // the mic's color always updates right away, even while the conversation is holding still
     { const m = $("#mic"); if(m){ m.className = "micb" + (v ? " "+v : ""); m.title = v==="live" ? "Tap to send" : "Tap to talk, tap again to send"; } }
-    if(holdStill()){ clearTimeout(renderConvo.later); renderConvo.later = setTimeout(()=>renderConvo(true), 600); return; }
+    if(holdStill()){ clearTimeout(renderConvo.later); renderConvo.later = setTimeout(()=>{ if(pointerHeld){ refreshWanted = refreshWanted === null ? true : refreshWanted; return; } renderConvo(true); }, 600); return; }
     const ct = $(".c-top"); if(ct.innerHTML !== top) ct.innerHTML = top;
     // redraw only the pieces that changed, so typing never waits on a full repaint of the conversation
     const pieces = turns ? turnHtml.concat([ask+notes+jobs]) : [body];
@@ -504,9 +504,12 @@ async function usageTick(){
 }
 usageTick(); setInterval(usageTick, 60000);
 async function refresh(keepScroll=true){
-  if(pointerHeld){ refreshWanted = refreshWanted === null ? keepScroll : (refreshWanted && keepScroll); return; }
-  if(openId){ if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(openId)); if(d.error){ openId=null; return refresh(); } D=d; renderConvo(keepScroll); }
-  else { S = await api("/api/state"); learnMachines(S); renderList(); }
+  const later = ()=>{ refreshWanted = refreshWanted === null ? keepScroll : (refreshWanted && keepScroll); };
+  if(pointerHeld) return later();
+  // The check above only runs BEFORE the fetch. A press that started while the answer was on its way still
+  // got its button rebuilt underneath it, so check again right before drawing.
+  if(openId){ const id = openId; if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(id)); if(id !== openId) return; if(d.error){ openId=null; return refresh(); } D=d; if(pointerHeld) return later(); renderConvo(keepScroll); }
+  else { const s = await api("/api/state"); if(openId) return; S = s; learnMachines(S); if(pointerHeld) return later(); renderList(); }
 }
 async function open(id){ openId=id; history.replaceState(null,"","#"+encodeURIComponent(id)); micSync(); await refresh(false); }
 function back(){ if(rec && rec.state==="recording") rec.stop(); openId=null; D=null; history.replaceState(null,"",location.pathname); micSync(); refresh(); }

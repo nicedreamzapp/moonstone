@@ -673,6 +673,27 @@ function outStep(file) {
   const segs = t.text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map(x => x.trim()).filter(Boolean);
   return { line: segs.length ? segs[segs.length - 1].slice(0, 110) : "Working (no output yet)", at: t.mtime };
 }
+// how full this chat's context is (Matt 10/5): the last main-thread reply's own usage numbers, read from the
+// transcript tail. Window per model: Haiku 200K, everything current 1M.
+function ctxOf(tp) {
+  if (!tp) return null;
+  try {
+    const st = fs.statSync(tp), n = Math.min(st.size, 400000), buf = Buffer.alloc(n), fd = fs.openSync(tp, "r");
+    fs.readSync(fd, buf, 0, n, st.size - n); fs.closeSync(fd);
+    const lines = buf.toString("utf8").split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"usage"')) continue;
+      let j; try { j = JSON.parse(lines[i]); } catch { continue; }
+      const u = j.message?.usage; if (j.type !== "assistant" || j.isSidechain || !u) continue;
+      const used = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
+      if (!used) continue;
+      const model = String(j.message.model || ""), max = /haiku/i.test(model) ? 200000 : 1000000;
+      return { used, max, pct: Math.min(100, Math.round(100 * used / max)) };
+    }
+  } catch {}
+  return null;
+}
+
 function bgTasks(tp) {
   if (!tp) return [];
   const e = bgScanFile(tp); if (!e) return [];
@@ -698,7 +719,7 @@ function sessionDetail(id) {
     const f = readFileModel(tp); const lab = labelFor(f.model.cwd);
     const live = liveTerminalSessions().some(x => x.sessionId === sid);
     return { id, kind: "terminal", label: lab.label, color: lab.color, title: f.model.title, cwd: f.model.cwd,
-      live, turns: lean(fullTurns(id)), jobs: bgTasks(tp).concat(readJobs()) };
+      live, turns: lean(fullTurns(id)), jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) };
   }
   const s = state.sessions.find(x => x.id === id); if (!s || s.hidden) return null;   // ended = gone from every window
   const p = procs.get(id);
@@ -707,7 +728,7 @@ function sessionDetail(id) {
   const turns = lean(fullTurns(id));
   return { id, kind: "dock", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd,
     busy: !!p?.busy, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
-    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()),
+    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp),
     ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null };
 }
 

@@ -115,6 +115,12 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 @keyframes beat{50%{opacity:.55}}
 /* background jobs card (10/4): pulsing ring, what's running, progress, ETA; sticks to the bottom of the chat */
 .jobs{position:sticky;bottom:0;z-index:2;display:flex;flex-direction:column;gap:6px;margin-top:10px}
+/* chat memory pill (10/5): how full the context is; orange at 60%, red at 80% */
+.ctxm{align-self:flex-end;order:9;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mut,#9aa);padding:2px 9px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(8px)}
+.ctxm .bar{width:44px;height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;display:inline-block}
+.ctxm .bar i{display:block;height:100%;background:#7fd1a8}
+.ctxm.warm .bar i{background:var(--need,#f0a040)} .ctxm.warm{color:var(--need,#f0a040)}
+.ctxm.hot .bar i{background:var(--err,#ff5d5d)} .ctxm.hot{color:var(--err,#ff5d5d)}
 .job{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;padding:8px 12px;border-radius:12px;background:rgba(20,16,8,.82);border:1px solid rgba(255,170,40,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .job .ring{grid-row:1/3;width:12px;height:12px;border-radius:50%;background:#ffaa28;animation:jobpulse 1.4s ease-out infinite}
 @keyframes jobpulse{0%{box-shadow:0 0 0 0 rgba(255,170,40,.7)}70%{box-shadow:0 0 0 10px rgba(255,170,40,0)}100%{box-shadow:0 0 0 0 rgba(255,170,40,0)}}
@@ -374,9 +380,15 @@ function jobEta(j){
   const fin = new Date((now + left)*1000).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
   return `~${f(left)} left · done ${fin}`;
 }
+function ctxHtml(d){
+  const x = d.ctx; if(!x) return "";
+  const k = n => n >= 1e6 ? (n/1e6).toFixed(1).replace(/\.0$/,"")+"M" : Math.round(n/1000)+"K";
+  const cls = x.pct >= 80 ? " hot" : x.pct >= 60 ? " warm" : "";
+  return `<div class="ctxm${cls}" title="How full this chat's memory is. Near 100% it gets summarized and older detail is lost."><span class="bar"><i style="width:${Math.max(2,x.pct)}%"></i></span>memory ${x.pct}% · ${k(x.used)} of ${k(x.max)}</div>`;
+}
 function jobsHtml(d){
-  const js = d.jobs || []; if(!js.length) return "";
-  return `<div class="jobs">${js.map(j=>{ const pct = j.total ? Math.min(100, Math.round(100*j.done/j.total)) : null;
+  const js = d.jobs || [], ctx = ctxHtml(d); if(!js.length && !ctx) return "";
+  return `<div class="jobs">${ctx}${js.map(j=>{ const pct = j.total ? Math.min(100, Math.round(100*j.done/j.total)) : null;
     const kind = j.kind==="agent" ? "agent" : j.kind==="monitor" ? "watch" : j.kind==="bash" ? "task" : "job";
     if(pct===null && j.eta_end && j.start) j._pct = 1;
     return `<div class="job" data-job='${esc(JSON.stringify(j))}'><span class="ring"></span><div class="jl"><span class="kind">${kind}</span>${esc(j.label)}</div>

@@ -603,7 +603,7 @@ function bgScanFile(tp) {
     const fd = fs.openSync(tp, "r"); const buf = Buffer.alloc(st.size - e.off); fs.readSync(fd, buf, 0, buf.length, e.off); fs.closeSync(fd);
     e.off = st.size; const lines = (e.rest + buf.toString("utf8")).split("\n"); e.rest = lines.pop();
     for (const line of lines) {
-      if (!line.includes("tool_use") && !line.includes("task-notification") && !line.includes("in background") && !line.includes("moved to the background")) continue;
+      if (!line.includes("tool_use") && !line.includes("stopped task") && !line.includes("task-notification") && !line.includes("in background") && !line.includes("moved to the background")) continue;
       let j; try { j = JSON.parse(line); } catch { continue; }
       if (j.isSidechain) continue;
       const ts = Date.parse(j.timestamp || "") || Date.now();
@@ -623,10 +623,15 @@ function bgScanFile(tp) {
       }
       if (j.type === "user" && Array.isArray(content)) {
         for (const c of content) {
-          if (c.type !== "tool_result") continue; const t = e.tasks.get(c.tool_use_id); if (!t) continue;
+          if (c.type !== "tool_result") continue;
+          // a task stopped by hand (TaskStop) never gets a task-notification, so close its card here
+          const stopped = /Successfully stopped task: (\w+)/.exec(textOf(c.content))?.[1];
+          if (stopped) for (const x of e.tasks.values()) if (x.bgId === stopped || x.agentId === stopped) x.open = false;
+          const t = e.tasks.get(c.tool_use_id); if (!t) continue;
           const txt = textOf(c.content);
+          const bid = /running in background with ID: (\w+)/.exec(txt); if (bid) t.bgId = bid[1];
           const of = /Output is being written to: (\S+?)\.?(?:\s|$)/.exec(txt) || /output_file: (\S+)/.exec(txt);
-          if (t.pending) { delete t.pending; if (/moved to the background/.test(txt)) t.open = true; else { e.tasks.delete(c.tool_use_id); continue; } }
+          if (t.pending) { delete t.pending; if (/moved to the background/.test(txt.slice(0, 300))) t.open = true; else { e.tasks.delete(c.tool_use_id); continue; } }
           if (of) t.outFile = of[1];
           const aid = /agentId: (\w+)/.exec(txt); if (aid) t.agentId = aid[1];
           if (/Async agent launched|running in background|moved to the background|Monitor started/.test(txt) === false && t.kind !== "agent") { t.open = false; }

@@ -819,6 +819,11 @@ function reloadSoon(){   // a design change landed: reload, but only once the bo
 }
 const h = decodeURIComponent(location.hash.slice(1)); if(h) openId=h;
 refresh(false); connect();
+
+/* idle rest: after 45s with no mouse, key or touch, pause every endlessly looping animation
+   (the aurora, the pulsing dots and badges) and resume on the next input. An open Moonstone tab
+   was holding a GPU near 90% all day just redrawing the background. One-shot animations still finish. */
+(function(){if(window.__idleRest)return;window.__idleRest=2;var T=45000,t,r=false,h=[],k=[];function q(s,f){try{[].forEach.call(document.querySelectorAll(s),function(e){try{f(e)}catch(x){}})}catch(x){}}function z(){r=true;try{document.getAnimations().forEach(function(a){try{if(a.playState==="running"&&a.effect&&a.effect.getComputedTiming().iterations===Infinity){a.pause();h.push(a)}}catch(e){}})}catch(e){}q(".flickity-enabled",function(e){var f=(window.Flickity&&Flickity.data&&Flickity.data(e))||(window.jQuery&&jQuery(e).data("flickity"));if(f&&f.player&&f.player.state==="playing"){f.pausePlayer();k.push(function(){f.unpausePlayer()})}});q(".swiper,.swiper-container",function(e){var s=e.swiper;if(s&&s.autoplay&&s.autoplay.running){s.autoplay.stop();k.push(function(){s.autoplay.start()})}});q("video",function(v){if(!v.paused&&v.loop&&v.muted&&!v.controls){v.pause();k.push(function(){v.play()})}})}function w(){if(r){r=false;h.forEach(function(a){try{a.play()}catch(e){}});h=[];k.forEach(function(f){try{f()}catch(e){}});k=[]}clearTimeout(t);t=setTimeout(z,T)}["pointermove","pointerdown","keydown","wheel","touchstart","scroll"].forEach(function(e){addEventListener(e,w,{passive:true,capture:true})});setInterval(function(){if(r)z()},5000);w()})();
 </script>
 </body>
 </html>

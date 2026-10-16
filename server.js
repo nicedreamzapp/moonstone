@@ -726,7 +726,7 @@ function sessionDetail(id) {
   if (p) p.unread = false;
   const tp = s.kind === "pipe" || s.kind === "api" ? null : findTranscript(s.sessionId); const f = tp ? readFileModel(tp) : null;
   const turns = lean(fullTurns(id));
-  return { id, kind: "dock", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd,
+  return { id, kind: "dock", local: s.kind === "pipe" || s.kind === "api", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd,
     busy: !!p?.busy, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
     err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp),
     ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null };
@@ -937,6 +937,35 @@ async function transcribe(buf) {
   }
 }
 
+// ---------- narration for local models: say it like a person, not a log file ----------
+// Local models answer with paths, ports, ids and tables. Read raw, that's noise. A small local model
+// (config.json "speak": { url, model }, any OpenAI-style server) rewrites the answer as a few plain
+// sentences; the scrub runs after it either way and is the whole job if no model is set or it is down.
+function earScrub(t) {
+  return String(t)
+    .replace(/```[\s\S]*?```/g, " ").replace(/`([^`]*)`/g, "$1")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, " ")
+    .replace(/^\s*\|.*\|\s*$/gm, " ")                                   // table rows
+    .replace(/(?:~|\.{1,2})?(?:\/[\w.@%+-]+){2,}\/?/g, " ")              // unix paths
+    .replace(/[A-Za-z]:\\[^\s]+/g, " ")                                  // windows paths
+    .replace(/\b[\w-]+\.(?:py|js|json|sh|md|txt|log|html|css|ts|plist|yaml|yml|toml|env|command|app|swift|kt|wav|png|jpg|mp4)\b/gi, " ")
+    .replace(/\b(?:localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?\b/g, " ").replace(/(?:port\s*)?:\d{4,5}\b/gi, " ")
+    .replace(/\b[0-9a-f]{7,}\b/gi, " ").replace(/\b\d{5,}\b/g, " ")      // hashes, ids, long numbers
+    .replace(/\b\w+(?:_\w+)+\b/g, " ")                                   // snake_case names
+    .replace(/^\s*[-*>#]+\s*/gm, "").replace(/[*_~|]/g, "")
+    .replace(/\s+([,.;:!?])/g, "$1").replace(/([,;:])\s*(?=[,;:.])/g, "").replace(/\s+/g, " ").trim();
+}
+async function speakable(text) {
+  let out = ""; const sp = CONFIG.speak || {};
+  if (sp.url) try {
+    const r = await fetch(sp.url.replace(/\/$/, "") + "/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(20000), body: JSON.stringify({ ...(sp.model ? { model: sp.model } : {}), temperature: 0.3, max_tokens: 300,
+        messages: [{ role: "system", content: "You turn an AI assistant's written answer into what a sensible person would say out loud to a friend. Rules: two to five short plain sentences. Keep only what matters to them: the answer, what happened, what they need to do. Never say file names, folder paths, URLs, ports, IP addresses, code, commands, ids, hashes, version numbers or settings. Only say a number if it truly matters (a price, a time, a count they asked for), and round it. No lists, no markdown, no lead-in like 'Here is'. Output only the spoken words." },
+          { role: "user", content: String(text).slice(0, 6000) }] }) });
+    const j = await r.json(); out = j.choices?.[0]?.message?.content || "";
+  } catch {}
+  return earScrub(out.trim() || text);
+}
 let narrOwner = { id: null, at: 0 };   // which open Moonstone window narrates (one voice, even with windows on every machine)
 const server = http.createServer(async (req, res) => {
   const host = (req.headers.host || "").replace(/:\d+$/, "");
@@ -1043,6 +1072,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === "/api/narrator") {   // the window you touched last is the one that reads answers out loud
         narrOwner = { id: String(b.id || "").slice(0, 40), at: Date.now() }; return json(res, 200, narrOwner);
       }
+      if (url.pathname === "/api/speakable") return json(res, 200, { text: await speakable(String(b.text || "")) });
       if (url.pathname === "/api/tts") {   // narration: text in, wav out, from a local Kokoro server (config "tts")
         const tts = CONFIG.tts || {};
         const text = String(b.text || "").slice(0, 4000).trim();

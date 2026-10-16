@@ -21,6 +21,7 @@
   ],
   "stt": { "python": "/usr/bin/python3", "model": "mlx-community/whisper-large-v3-turbo" },
   "tts": { "url": "http://127.0.0.1:7864/tts", "voice": "af_heart", "speed": 1.0 },
+  "speak": { "url": "http://127.0.0.1:8080", "model": "any-small-local-model" },
   "dictate": {},
   "remoteOrigins": [],
   "oneWindowTerminals": []

@@ -735,7 +735,7 @@ function narrCheck(d){
   if(k === null || narrSeen[openId] === k) return;
   narrSeen[openId] = k;
   if(!narrOn || !k) return;
-  const t = d.turns[+k.split("|")[0]]; narrSay(t.answer);
+  const t = d.turns[+k.split("|")[0]]; narrSay(t.answer, d.local || /gemma|qwen|heretic|muse|local/i.test(d.label||""));
 }
 function narrText(md){
   return md.replace(/```[\s\S]*?```/g," ").replace(/`([^`]*)`/g,"$1").replace(/!?\[([^\]]*)\]\([^)]*\)/g,"$1")
@@ -747,11 +747,14 @@ let claimedAt = 0;
 function narrClaim(){ if(Date.now() - claimedAt < 3000) return; claimedAt = Date.now();
   fetch(BASE+"api/narrator",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({id:WIN_ID})}).catch(()=>{}); }
 addEventListener("pointerdown", narrClaim, true); addEventListener("keydown", narrClaim, true);
-async function narrSay(md){
+async function narrSay(md, local){
   if(micLive()) return;                                        // you're talking: never read over you
   try { const o = await (await fetch(BASE+"api/narrator")).json(); if(o.id && o.id !== WIN_ID) return; } catch {}
+  // local models write like a log file: have the dock turn it into a few plain spoken sentences first (10/15)
+  let say = narrText(md);
+  if(local){ try { const r = await fetch(BASE+"api/speakable",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({text:md})}); if(r.ok){ const j = await r.json(); if(j.text) say = j.text; } } catch {} }
   narrHush(); const my = narrGen;
-  const parts = (narrText(md).match(/[^.!?]+[.!?]*\s*/g) || []).reduce((a,x)=>{ if(a.length && (a[a.length-1]+x).length < 300) a[a.length-1]+=x; else a.push(x); return a; }, []);
+  const parts = (say.match(/[^.!?]+[.!?]*\s*/g) || []).reduce((a,x)=>{ if(a.length && (a[a.length-1]+x).length < 300) a[a.length-1]+=x; else a.push(x); return a; }, []);
   // ask for every piece up front so there's no gap between them, play them in order
   narrQ = parts.map(p => fetch(BASE+"api/tts",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({text:p})})
     .then(r => r.ok ? r.blob() : null).catch(()=>null));

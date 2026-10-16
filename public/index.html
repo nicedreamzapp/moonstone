@@ -747,12 +747,29 @@ let claimedAt = 0;
 function narrClaim(){ if(Date.now() - claimedAt < 3000) return; claimedAt = Date.now();
   fetch(BASE+"api/narrator",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({id:WIN_ID})}).catch(()=>{}); }
 addEventListener("pointerdown", narrClaim, true); addEventListener("keydown", narrClaim, true);
+// Same cut the dock makes server-side (narrClean in server.js), here too so it is live the moment the
+// page reloads: a local agent prints status lines, tool calls, tool output and sometimes a crash before
+// its answer, and only the answer is for the ear (Matt, 10/15 evening).
+function narrCleanPage(t){
+  const s = String(t).replace(/\r/g, "");
+  if(/Abort trap|libc\+\+abi|Traceback \(most recent|Segmentation fault|GPU Timeout|Killed: 9|core dumped/i.test(s))
+    return "The local model crashed and stopped. You will need to start it again.";
+  const lines = s.split("\n"); let cut = -1;
+  lines.forEach((l, i) => { if(/^\s*(\u2692|\[\d+ cached \+ \d+ new\]|===|›)/.test(l)) cut = i; });
+  const codey = l =>
+    /^\s*(import |from \S+ import|def |class |for |if |elif |else:|while |try:|except|return |print\(|cd |ls |grep |python|bash|curl |git |npm |pip |\$ |#!|["'`{}\[\]()])/.test(l)
+    || /[=;{}]\s*$|\w\([^)]*\)|\['|'\]|\|\s|^\s*[\w.\/-]+:\d+|^\s*[-=_*#]{3,}\s*$/.test(l)
+    || /^\s*(warnings\.warn|\w*Warning|\w*Error|Exception|at |File ")/.test(l);
+  return lines.slice(cut + 1).filter(l => l.trim() && !codey(l)).join(" ").replace(/\s+/g, " ").trim();
+}
 async function narrSay(md, local){
   if(micLive()) return;                                        // you're talking: never read over you
+  if(local){ md = narrCleanPage(md); if(!md) return; }        // only the answer, never the work
   try { const o = await (await fetch(BASE+"api/narrator")).json(); if(o.id && o.id !== WIN_ID) return; } catch {}
   // local models write like a log file: have the dock turn it into a few plain spoken sentences first (10/15)
   let say = narrText(md);
-  if(local){ try { const r = await fetch(BASE+"api/speakable",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({text:md})}); if(r.ok){ const j = await r.json(); if(j.text) say = j.text; } } catch {} }
+  if(local){ try { const r = await fetch(BASE+"api/speakable",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({text:md})}); if(r.ok){ const j = await r.json(); say = (j.text || "").trim(); } } catch {} }
+  if(!say) return;                                             // the dock found nothing worth saying out loud
   narrHush(); const my = narrGen;
   const parts = (say.match(/[^.!?]+[.!?]*\s*/g) || []).reduce((a,x)=>{ if(a.length && (a[a.length-1]+x).length < 300) a[a.length-1]+=x; else a.push(x); return a; }, []);
   // ask for every piece up front so there's no gap between them, play them in order

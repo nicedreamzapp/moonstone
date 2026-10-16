@@ -955,8 +955,27 @@ function earScrub(t) {
     .replace(/^\s*[-*>#]+\s*/gm, "").replace(/[*_~|]/g, "")
     .replace(/\s+([,.;:!?])/g, "$1").replace(/([,;:])\s*(?=[,;:.])/g, "").replace(/\s+/g, " ").trim();
 }
+// A local agent prints its whole turn: cache-status lines, tool calls, tool output, sometimes a
+// crash, and then the answer. Only the answer is for the ear (Matt, 10/15 evening: "all those
+// numbers"). Cut everything up to the last tool/status line, drop what still looks like code or a
+// log line, and turn a crash into one plain sentence.
+function narrClean(t) {
+  const s = String(t).replace(/\r/g, "");
+  if (/Abort trap|libc\+\+abi|Traceback \(most recent|Segmentation fault|GPU Timeout|Killed: 9|core dumped/i.test(s))
+    return "The local model crashed and stopped. You will need to start it again.";
+  const lines = s.split("\n");
+  let cut = -1;
+  lines.forEach((l, i) => { if (/^\s*(\u2692|\[\d+ cached \+ \d+ new\]|===|›)/.test(l)) cut = i; });
+  const codey = l =>
+    /^\s*(import |from \S+ import|def |class |for |if |elif |else:|while |try:|except|return |print\(|cd |ls |grep |python|bash|curl |git |npm |pip |\$ |#!|["'`{}\[\]()])/.test(l)
+    || /[=;{}]\s*$|\w\([^)]*\)|\['|'\]|\|\s|^\s*[\w.\/-]+:\d+|^\s*[-=_*#]{3,}\s*$/.test(l)
+    || /^\s*(warnings\.warn|\w*Warning|\w*Error|Exception|at |File ")/.test(l);
+  return lines.slice(cut + 1).filter(l => l.trim() && !codey(l)).join(" ").replace(/\s+/g, " ").trim();
+}
 async function speakable(text, noPeer) {
   let out = ""; const sp = CONFIG.speak || {};
+  text = narrClean(text);
+  if (!text) return "";                      // nothing worth saying: the page stays quiet
   if (sp.url) try {
     const r = await fetch(sp.url.replace(/\/$/, "") + "/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" },
       signal: AbortSignal.timeout(20000), body: JSON.stringify({ ...(sp.model ? { model: sp.model } : {}), temperature: 0.3, max_tokens: 300,

@@ -949,13 +949,13 @@ function earScrub(t) {
     .replace(/(?:~|\.{1,2})?(?:\/[\w.@%+-]+){2,}\/?/g, " ")              // unix paths
     .replace(/[A-Za-z]:\\[^\s]+/g, " ")                                  // windows paths
     .replace(/\b[\w-]+\.(?:py|js|json|sh|md|txt|log|html|css|ts|plist|yaml|yml|toml|env|command|app|swift|kt|wav|png|jpg|mp4)\b/gi, " ")
-    .replace(/\b(?:localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?\b/g, " ").replace(/(?:port\s*)?:\d{4,5}\b/gi, " ")
+    .replace(/\b(?:localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?\b/g, " ").replace(/(?:\bport\s*)?:\d{2,5}\b/gi, " ").replace(/\bports?\s+\d{2,5}\b/gi, "")
     .replace(/\b[0-9a-f]{7,}\b/gi, " ").replace(/\b\d{5,}\b/g, " ")      // hashes, ids, long numbers
     .replace(/\b\w+(?:_\w+)+\b/g, " ")                                   // snake_case names
     .replace(/^\s*[-*>#]+\s*/gm, "").replace(/[*_~|]/g, "")
     .replace(/\s+([,.;:!?])/g, "$1").replace(/([,;:])\s*(?=[,;:.])/g, "").replace(/\s+/g, " ").trim();
 }
-async function speakable(text) {
+async function speakable(text, noPeer) {
   let out = ""; const sp = CONFIG.speak || {};
   if (sp.url) try {
     const r = await fetch(sp.url.replace(/\/$/, "") + "/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" },
@@ -964,6 +964,11 @@ async function speakable(text) {
           { role: "user", content: String(text).slice(0, 6000) }] }) });
     const j = await r.json(); out = j.choices?.[0]?.message?.content || "";
   } catch {}
+  // no model here (or it's down): ask a peer that has one, once, so every window gets the real rewrite
+  if (!out.trim() && !noPeer) for (const peer of CONFIG.peers || []) {
+    if (!peer.url) continue;
+    try { const r = await peerFetch(peer, "POST", "/api/speakable", { text, nopeer: true }, 25000); if (r.code === 200 && r.body?.text && r.body.model) return r.body.text; } catch {}
+  }
   return earScrub(out.trim() || text);
 }
 let narrOwner = { id: null, at: 0 };   // which open Moonstone window narrates (one voice, even with windows on every machine)
@@ -1072,7 +1077,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === "/api/narrator") {   // the window you touched last is the one that reads answers out loud
         narrOwner = { id: String(b.id || "").slice(0, 40), at: Date.now() }; return json(res, 200, narrOwner);
       }
-      if (url.pathname === "/api/speakable") return json(res, 200, { text: await speakable(String(b.text || "")) });
+      if (url.pathname === "/api/speakable") { const t = String(b.text || ""); const out = await speakable(t, !!b.nopeer); return json(res, 200, { text: out, model: out !== earScrub(t) }); }
       if (url.pathname === "/api/tts") {   // narration: text in, wav out, from a local Kokoro server (config "tts")
         const tts = CONFIG.tts || {};
         const text = String(b.text || "").slice(0, 4000).trim();

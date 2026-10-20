@@ -105,10 +105,16 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .badge.turn{color:#d6ecff;background:rgba(74,168,255,.2);border:1px solid rgba(74,168,255,.7);box-shadow:0 0 16px rgba(74,168,255,.4);animation:glow 1.6s ease-in-out infinite}
 .badge.turn::before{content:"";width:7px;height:7px;border-radius:50%;background:#4aa8ff}
 .s-yourturn .dot{background:#4aa8ff;box-shadow:0 0 0 3px rgba(74,168,255,.25),0 0 14px #4aa8ff;animation:beat 1.2s infinite}
-.yourturn{position:sticky;bottom:0;z-index:3;margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(8,22,40,.9);border:1px solid rgba(74,168,255,.7);box-shadow:0 0 22px rgba(74,168,255,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:turnglow 1.8s ease-in-out infinite}
-.yourturn b{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.08em;color:#4aa8ff;margin-bottom:4px}
-.yourturn b::before{content:"";width:9px;height:9px;border-radius:50%;background:#4aa8ff;animation:jobpulse 1.4s ease-out infinite;box-shadow:0 0 0 0 rgba(74,168,255,.7)}
-.yourturn div{font-size:13.5px;color:#e6f2ff;line-height:1.4}
+.yourturn{margin-top:10px;padding:8px 10px;border-radius:14px;background:rgba(8,22,40,.92);border:1px solid rgba(74,168,255,.6);display:flex;flex-direction:column;gap:7px;box-sizing:border-box;max-width:100%}
+.yourturn b{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.08em;color:#4aa8ff}
+.yourturn b::before{content:"";width:7px;height:7px;border-radius:50%;background:#4aa8ff;animation:jobpulse 1.4s ease-out infinite;box-shadow:0 0 0 0 rgba(74,168,255,.7)}
+.yourturn .tq{font-size:13px;color:#e6f2ff;line-height:1.4;overflow-wrap:anywhere}
+.yourturn .qr{display:flex;flex-wrap:wrap;gap:6px}
+.yourturn .qa{font-size:12px;padding:4px 12px;border-radius:999px;border:1px solid rgba(74,168,255,.5);background:rgba(74,168,255,.12);color:#e6f2ff;cursor:pointer}
+.yourturn .qa:hover{filter:brightness(1.3)}
+.yourturn .qa.go{border-color:rgba(46,204,113,.75);background:rgba(46,204,113,.2);color:#c9f7da}
+.yourturn .qa.stop{border-color:rgba(255,82,82,.75);background:rgba(255,82,82,.18);color:#ffd0d0}
+.yourturn .qa.type{border-style:dashed;background:transparent;color:#a9c8ee}
 @keyframes turnglow{50%{box-shadow:0 0 34px rgba(74,168,255,.6)}}
 .badge.err{color:#ffc2cc;background:rgba(255,95,122,.14);border:1px solid rgba(255,95,122,.45)}
 @keyframes glow{50%{box-shadow:0 0 26px rgba(255,171,61,.6)}}
@@ -436,7 +442,7 @@ function renderConvo(keepScroll){
   const mic = `<button class="micb${v?" "+v:""}" id="mic" title="${v==="live"?"Tap to send":"Tap to talk, tap again to send"}">${MIC_SVG}</button>`;
   const compose = `<div class="glass compose" style="--c:${c}"><textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}<button class="send" id="send">Send</button></div>`;
   const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>${d.kind==="dock"?`<button class="ghost" id="close" title="End this session">End</button>`:""}`;
-  const jobs = (d.ask && !d.busy && !d.perm ? `<div class="yourturn"><b>YOUR TURN</b><div>${esc(d.ask)}</div></div>` : "") + jobsHtml(d);
+  const jobs = (d.ask && !d.busy && !d.perm ? `<div class="yourturn"><b>YOUR TURN</b><div class="tq">${esc(d.ask)}</div><div class="qr">${quickAnswers(d).map(o=>`<button class="qa ${qaTone(o)}" data-quick="${esc(o)}">${esc(o)}</button>`).join("")}<button class="qa type" data-type="1">Type something</button></div></div>` : "") + jobsHtml(d);
   turnTitle(!!(d.ask && !d.busy && !d.perm));
   const body = `${turns||`<div class="empty">Say what you want ${esc(d.label)} to do.</div>`}${ask}${notes}${jobs}`;
   // Same chat already on screen: leave the message box alone. Rebuilding it under the cursor made Mac dictation
@@ -572,6 +578,8 @@ document.addEventListener("click", async e=>{
   if(t.closest("#cont")){ const [mach, local] = openId.includes("~") ? openId.split("~") : [null, openId];
     const r = await api("/api/continue",{sessionId:local.slice(2), machine:mach||undefined}); return r.id?open(r.id):null; }
   const a = t.closest("[data-allow]"); if(a){ await api(`/api/session/${openId}/perm`,{request_id:D.perm.request_id, allow:a.dataset.allow==="1"}); return refresh(); }
+  if(t.closest("[data-type]")){ $("#ta").focus(); return; }
+  const qk = t.closest("[data-quick]"); if(qk){ const ta=$("#ta"); if(ta.value.trim()) return ta.focus(); ta.value = qk.dataset.quick; return sendMsg(); }
   const q = t.closest("[data-answer]"); if(q){ await api(`/api/session/${openId}/perm`,{request_id:D.perm.request_id, allow:false, answer:q.dataset.answer}); return refresh(); }
 });
 // ---------- push to talk ----------
@@ -795,6 +803,16 @@ function narrToggle(){
   if(D) renderConvo(true);
 }
 
+// 10/20: YOUR TURN card buttons. Never a lock: the message box stays open and typing always wins.
+// Options come from an "Options: A | B | C" line in the answer, else Yes/No for a yes-or-no question.
+function quickAnswers(d){
+  let txt = ""; for(const t of (d.turns||[]).slice().reverse()) if(t && typeof t.answer==="string" && t.answer.trim()){ txt = t.answer; break; }
+  const m = txt.match(/^[ \t>*_]*(?:options|answers?)[*_]*:[*_]*\s*(.+)$/im);
+  if(m){ const o = m[1].split(/\s*\|\s*/).map(x=>x.replace(/[*_`]/g,"").trim()).filter(x=>x && x.length<=40); if(o.length) return o.slice(0,5); }
+  const q = (d.ask||"").replace(/^[^:]{0,30}:\s*/,"");
+  return /^(is|are|am|do|does|did|should|shall|can|could|will|would|want|was|were|has|have|ok)\b/i.test(q) ? ["Yes","No"] : [];
+}
+function qaTone(o){ return /^(yes|yep|looks good|go|approve|do it|send it|ok)\b/i.test(o) ? "go" : /^(no|nope|stop|don'?t|cancel|skip)\b/i.test(o) ? "stop" : ""; }
 async function sendMsg(){
   const ta=$("#ta"); const text=ta.value.trim(); if(!text) return;
   ta.value=""; drafts[openId]=""; autosize(ta);

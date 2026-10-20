@@ -618,11 +618,21 @@ const IS_PHONE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navig
 let osDict = null;
 // a window opened on the machine itself talks to its own server; a copy served from elsewhere reaches the server on whichever machine it's open on
 const DICT_URL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? BASE + "api/dictate" : "http://127.0.0.1:8899/api/dictate";
+// 10/20: the native Moonstone.app can't let this https page call the machine's own dock (WebKit blocks
+// http://127.0.0.1 here), so the app makes that one call for us. Same answer shape as fetch.
+async function dockFetch(url, opts){
+  const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.dock;
+  if(!bridge) return fetch(url, opts);
+  const r = await bridge.postMessage({url: String(url), body: String((opts && opts.body) || "{}")});
+  const st = (r && r.status) || 0, txt = (r && r.text) || "";
+  if(!st) throw new TypeError("the Moonstone app couldn't reach this machine's dock");
+  return {ok: st >= 200 && st < 300, status: st, text: async () => txt, json: async () => JSON.parse(txt || "{}")};
+}
 async function osDictOn(){
   if(!openId) return toast("Open a session first, then tap the mic");
   const ta = $("#ta"); if(ta){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   let ok = false, reached = false, why = "";
-  try { const r = await fetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"start"}'}); ok = r.ok; reached = r.status !== 409;
+  try { const r = await dockFetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"start"}'}); ok = r.ok; reached = r.status !== 409;
         if(!ok) why = (await r.json().catch(()=>({}))).error || ""; } catch {}
   // This machine has the real dictation but it hiccupped: say so. Never quietly switch to the browser's own recording -
   // it can pick a different microphone (a nearby phone via Continuity, say) and runs a second, worse transcriber.
@@ -636,7 +646,7 @@ async function osDictOff(){
   const t = $("#ta"); if(t) t.focus();
   // ask for the stop, but don't wait on it: the helper takes a few seconds to confirm, and your message
   // shouldn't sit there. Words are already in the box; give Apple a beat for the last one, then send.
-  const stopping = fetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"stop"}'})
+  const stopping = dockFetch(DICT_URL, {method:"POST", headers:{"content-type":"application/json","x-dock":"1"}, body:'{"want":"stop"}'})
     .then(r => r.ok).catch(() => false);
   await new Promise(z => setTimeout(z, 250));
   const ta = $("#ta"); if(ta) drafts[sendTo] = ta.value;

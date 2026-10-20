@@ -678,7 +678,10 @@ function srStart(){
   try { r.start(); } catch { sr = null; srBroken = true; return micToggle(); }
   micState("live");
 }
-const stt = blob => fetch(BASE + "api/stt", {method:"POST", headers:{"content-type":"application/octet-stream","x-dock":"1"}, body: blob}).then(r=>r.json());
+// 10/20: whisper invents these from silence ("thank you" typed itself before Matt spoke); alone, they are silence
+const SILENCE_JUNK = /^[\s.!?,♪-]*(thank you( very much| so much)?|thanks( for watching| for listening)?|thank you for watching|you|bye|bye-bye|subtitles by.*|please subscribe.*)?[\s.!?,♪-]*$/i;
+const stt = blob => fetch(BASE + "api/stt", {method:"POST", headers:{"content-type":"application/octet-stream","x-dock":"1"}, body: blob}).then(r=>r.json())
+  .then(j => (j && typeof j.text === "string" && SILENCE_JUNK.test(j.text)) ? {...j, text: "", error: "I did not catch that, tap the mic and try again"} : j);
 async function micToggle(){
   if(rec){ if(rec.state === "recording") rec.stop(); return; }
   if(!openId) return toast("Open a session first, then tap the mic");

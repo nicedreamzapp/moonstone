@@ -65,6 +65,11 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .machine{position:relative;padding:10px 10px 8px 14px;overflow:hidden;flex-shrink:0}
 .machine::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c);box-shadow:0 0 18px var(--c)}
 .machine::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,color-mix(in srgb,var(--c) 16%,transparent),transparent 55%);pointer-events:none}
+/* 10/21: each machine's whole section carries a faint wash of its own colour, so machines read apart at a glance */
+.machine{background:linear-gradient(165deg,color-mix(in srgb,var(--c) 12%,var(--glass)),color-mix(in srgb,var(--c) 5%,var(--glass)) 70%);border-color:color-mix(in srgb,var(--c) 26%,var(--rim))}
+.machine .card{background:color-mix(in srgb,var(--c) 5%,transparent);margin-top:3px;border-top-color:transparent}
+.machine .card:first-child{margin-top:0}
+.machine .card:hover{background:color-mix(in srgb,var(--c) 11%,transparent)}
 .machine.off{opacity:.6}
 .m-head{position:relative;z-index:1;display:flex;align-items:center;gap:10px;padding:2px 4px 8px}
 .m-name{font-size:17px;font-weight:600;color:var(--c);letter-spacing:.02em}
@@ -171,6 +176,26 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .convo{flex:1;display:flex;flex-direction:column;min-height:0;gap:10px}
 .c-top{display:flex;align-items:center;gap:8px;padding:8px 10px}
 .mpill{padding:3px 10px;border-radius:999px;font-weight:600;font-size:12px;color:#fff;background:color-mix(in srgb,var(--c) 55%,transparent);box-shadow:0 0 14px color-mix(in srgb,var(--c) 50%,transparent)}
+/* 10/21 subject bar: what this chat is about, in a slightly different tint of the chat's colour; tap to rename */
+.c-subj{position:relative;z-index:6;display:flex;align-items:center;gap:8px;padding:4px 6px 4px 12px;flex-shrink:0;border-radius:12px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--c) 20%,var(--glass2)),color-mix(in srgb,var(--c) 9%,var(--glass2)));border-color:color-mix(in srgb,var(--c) 35%,var(--rim))}
+.sj-t{min-width:0;flex:0 1 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;font-weight:500;letter-spacing:.01em;text-align:left;color:color-mix(in srgb,var(--c) 30%,white);padding:2px 0}
+.sj-t:hover{color:#fff}
+.sj-in{flex:1;min-width:0;font:500 12px var(--sans);color:#fff;background:rgba(0,0,0,.3);border:1px solid color-mix(in srgb,var(--c) 50%,transparent);border-radius:8px;padding:2px 8px;outline:none}
+.sj-r{margin-left:auto;flex:none;padding:2px 9px;border-radius:999px;font-size:11px;color:var(--dim);border:1px solid var(--rim);background:rgba(0,0,0,.18);white-space:nowrap}
+.sj-r b{font-weight:600;color:var(--fg)}
+.sj-r.on,.sj-r:hover{color:var(--fg);border-color:color-mix(in srgb,var(--c) 55%,transparent)}
+.sj-drop{position:absolute;top:calc(100% + 4px);right:0;width:min(440px,100%);max-height:min(55vh,420px);overflow-y:auto;padding:6px;border-radius:12px;
+  background:#0b0d1d;border:1px solid color-mix(in srgb,var(--c) 30%,var(--rim));box-shadow:0 12px 30px rgba(0,0,0,.6);scrollbar-width:thin;isolation:isolate}
+.rq{display:grid;grid-template-columns:14px minmax(0,1fr) auto;column-gap:7px;align-items:baseline;padding:4px 6px;border-radius:8px;font-size:12px;line-height:1.35}
+.rq+.rq{border-top:1px solid var(--rim2)}
+.rq i{font-style:normal;font-weight:700;text-align:center}
+.rq.ok i{color:var(--ok)} .rq.no i{color:var(--err)}
+.rq span{overflow-wrap:anywhere}
+.rq small{color:var(--faint);font-size:10.5px;white-space:nowrap;font-family:var(--mono)}
+.rq.no small{color:var(--dim);font-family:var(--sans)}
+.rq.wait small{color:#bfe0ff}
+.rq-note{font-size:11px;color:var(--faint);padding:4px 6px}
 .c-title{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500}
 .c-title small{color:var(--dim);font-weight:400;margin-left:6px}
 .ghost{padding:5px 11px;border-radius:999px;border:1px solid var(--rim);font-size:12px;color:var(--dim);background:rgba(255,255,255,.03);white-space:nowrap}
@@ -329,7 +354,7 @@ function cardHtml(s){
     : `<span class="st">${ago(s.updated)}</span>`;
   return `<button class="card s-${s.status}" data-open="${esc(s.id)}">
     <span class="dot"></span>
-    <span class="c-name">${esc(s.label)}${s.title?`<small>${esc(s.title)}</small>`:""}</span>${st}
+    <span class="c-name">${esc(s.label)}${s.subject||s.title?`<small>${esc(s.subject||s.title)}</small>`:""}</span>${st}
     <span class="c-last">${esc(s.status==="yourturn" && s.ask ? "Waiting on you: " + s.ask : s.last)}</span>
     <span class="end${armed===s.id?" armed":""}" role="button" tabindex="0" data-end="${esc(s.id)}" title="End this session">${armed===s.id?"End it?":"×"}</span></button>`;
 }
@@ -410,6 +435,46 @@ setInterval(()=>{ for(const el of document.querySelectorAll(".job[data-job]")){ 
   if(!j.total && j.eta_end){ const b = el.querySelector(".bar i"); if(b) b.style.width = jobTimePct(j)+"%"; } }catch{} } }, 1000);
 // while anything is running, pull the latest step every 3 seconds
 setInterval(()=>{ if(openId && D?.jobs?.length && !document.hidden && !holdStill()) refresh(true).catch(()=>{}); }, 3000);
+// ---------- subject bar + requests checklist (10/21) ----------
+// Open chats are hard to tell apart, and in long chats it is easy to forget what was asked for.
+let reqOpen = null;   // chat id whose requests list is open
+const fmtTok = n => n >= 1e6 ? (n/1e6).toFixed(n >= 1e7 ? 0 : 1)+"M" : n >= 1000 ? Math.round(n/1000)+"k" : String(n);
+function subjHtml(d){
+  const r = d.reqs, items = r?.items || [], done = items.filter(x=>x.status==="done").length;
+  const pill = d.subject || items.length ? `<button class="sj-r${reqOpen===openId?" on":""}" id="sjr" title="Everything you asked for in this chat">Requests <b>${items.length||r?.busy||r?.stale ? done+"/"+items.length : "–"}</b></button>` : "";
+  let drop = "";
+  if(reqOpen === openId){
+    const rows = items.map(x=> x.status==="done"
+      ? `<div class="rq ok"><i>✓</i><span>${esc(x.text)}</span><small>${x.model ? esc(x.model)+(x.more?" +"+x.more:"")+(x.tok?" · ~"+fmtTok(x.tok)+" tok":"") : ""}</small></div>`
+      : `<div class="rq no${x.status==="waiting"?" wait":""}"><i>✗</i><span>${esc(x.text)}</span><small>${x.status==="waiting"?"waiting on you":"open"}</small></div>`).join("");
+    const note = r?.err === "unavailable" ? "The checklist isn't available on this machine." : r?.busy ? "Updating the list…" : r?.err ? "Couldn't update the list just now; showing the last one." : !items.length ? "No requests found yet." : "";
+    drop = `<div class="sj-drop">${rows}${note?`<div class="rq-note">${note}</div>`:""}</div>`;
+  }
+  return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(d.subject || "New chat")}</button>${pill}${drop}`;
+}
+function subjPaint(d){
+  const el = $("#csubj"); if(!el || $("#sjin")) return;   // never repaint under the user's typing
+  const h = subjHtml(d); if(el.__h === h) return;
+  const dr = el.querySelector(".sj-drop"), sc = dr ? dr.scrollTop : 0;
+  el.innerHTML = h; el.__h = h; const nd = el.querySelector(".sj-drop"); if(nd) nd.scrollTop = sc;
+}
+function subjEdit(){
+  const el = $("#csubj"); if(!el || $("#sjin")) return; const id = openId, was = D?.subject || "";
+  el.innerHTML = `<input class="sj-in" id="sjin" maxlength="80" value="${esc(was)}" placeholder="Name this chat">`; el.__h = null;
+  const inp = $("#sjin"); inp.focus(); inp.select();
+  let done = false;
+  const finish = async save => { if(done) return; done = true; const v = inp.value.replace(/\s+/g," ").trim();
+    if(save && v && v !== was){ if(D && openId === id) D.subject = v; const r = await api(`/api/session/${encodeURIComponent(id)}/subject`, {subject:v}); if(!r.ok) toast(r.error || "Couldn't rename it"); }
+    inp.remove(); if(D && openId === id) subjPaint(D); };
+  inp.addEventListener("keydown", e=>{ e.stopPropagation(); if(e.key==="Enter"){ e.preventDefault(); finish(true); } else if(e.key==="Escape"){ e.preventDefault(); finish(false); } });
+  inp.addEventListener("blur", ()=>finish(true));
+}
+async function reqToggle(){
+  if(reqOpen === openId){ reqOpen = null; return D && subjPaint(D); }
+  reqOpen = openId; if(D) subjPaint(D);
+  const id = openId, r = await api(`/api/session/${encodeURIComponent(id)}/reqs`, {});   // cached list now, a refresh starts only if there is something new
+  if(r && r.reqs && D && openId === id){ D.reqs = r.reqs; subjPaint(D); }
+}
 function renderConvo(keepScroll){
   const d = D; const c = MC[d.machine];
   const box = $(".msgs"); const atBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 60; const prev = box?.scrollTop;
@@ -456,6 +521,7 @@ function renderConvo(keepScroll){
     { const m = $("#mic"); if(m){ m.className = "micb" + (v ? " "+v : ""); m.title = v==="live" ? "Tap to send" : "Tap to talk, tap again to send"; } }
     if(holdStill()){ clearTimeout(renderConvo.later); renderConvo.later = setTimeout(()=>{ if(pointerHeld){ refreshWanted = refreshWanted === null ? true : refreshWanted; return; } renderConvo(true); }, 600); return; }
     const ct = $(".c-top"); if(ct.innerHTML !== top) ct.innerHTML = top;
+    subjPaint(d);
     // redraw only the pieces that changed, so typing never waits on a full repaint of the conversation
     const pieces = turns ? turnHtml.concat([ask+notes+jobs]) : [body];
     const box = $(".msgs"); const kids = box.children;
@@ -474,7 +540,9 @@ function renderConvo(keepScroll){
   }
   $("#app").innerHTML = `<div class="convo" data-id="${esc(openId)}" style="--c:${c}">
     <div class="glass c-top">${top}</div>
+    <div class="glass c-subj" id="csubj"></div>
     <div class="glass msgs">${body}</div>${compose}</div>`;
+  subjPaint(d);
   const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev;
   const t2 = $("#ta"); if(t2){ autosize(t2); if(document.activeElement===document.body) t2.focus(); t2.setSelectionRange(t2.value.length,t2.value.length); }
   narrCheck(d);
@@ -533,7 +601,7 @@ async function refresh(keepScroll=true){
   if(openId){ const id = openId; if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(id)); if(id !== openId) return; if(d.error){ openId=null; return refresh(); } D=d; if(pointerHeld) return later(); renderConvo(keepScroll); }
   else { const s = await api("/api/state"); if(openId) return; S = s; learnMachines(S); if(pointerHeld) return later(); renderList(); }
 }
-async function open(id){ openId=id; history.replaceState(null,"","#"+encodeURIComponent(id)); micSync(); await refresh(false); }
+async function open(id){ reqOpen = null; openId=id; history.replaceState(null,"","#"+encodeURIComponent(id)); micSync(); await refresh(false); }
 function back(){ if(rec && rec.state==="recording") rec.stop(); openId=null; D=null; history.replaceState(null,"",location.pathname); micSync(); refresh(); }
 
 document.addEventListener("toggle", e=>{ const g=e.target.dataset?.g; if(!g) return;
@@ -570,6 +638,9 @@ document.addEventListener("click", async e=>{
     if(r.opened){ toast(`Opened ${r.label} on the ${MN[l.dataset.machine]}`); return; }
     if(r.error){ toast(r.error); return; }
     return r.id?open(r.id):refresh(); }
+  if(t.closest("#sjt")) return subjEdit();
+  if(t.closest("#sjr")) return reqToggle();
+  if(reqOpen && !t.closest(".sj-drop")){ reqOpen = null; if(D) subjPaint(D); }
   if(t.closest("#back")) return back();
   if(t.closest("#narr")) return narrToggle();
   if(t.closest("#send")){ if(rec){ if(rec.state === "recording") rec.stop(); return; } if(micUi.cls) return; return sendMsg(); }

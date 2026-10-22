@@ -69,7 +69,7 @@ let launchers = loadLaunchers();
 
 // ---------- transcript parsing (incremental) ----------
 const files = new Map(); // path -> {offset, buf, model}
-function newModel() { return { turns: [], toolIndex: {}, cwd: null, title: null, lastPrompt: null, sessionId: null }; }
+function newModel() { return { turns: [], toolIndex: {}, toolTurn: {}, cwd: null, title: null, lastPrompt: null, sessionId: null }; }
 
 function cleanUserText(t) {
   if (typeof t !== "string") return "";
@@ -132,10 +132,13 @@ function apply(m, d) {
       if (b.type === "text" && b.text.trim()) turn.steps.push({ k: "text", text: b.text });
       else if (b.type === "tool_use") {
         const step = { k: "tool", name: b.name, line: summarizeTool(b.name, b.input), out: null };
-        m.toolIndex[b.id] = step; turn.steps.push(step);
+        m.toolIndex[b.id] = step; m.toolTurn[b.id] = m.turns.length - 1; turn.steps.push(step);
       }
     }
     turn.end = ts;
+    // requests checklist: everything each reply cost (input + output + cache), per model; a reply's blocks repeat its id
+    if (msg.id && msg.usage) { const u = msg.usage;
+      (turn.useBy || (turn.useBy = {}))[msg.id] = { m: msg.model || "", t: (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) }; }
   }
 }
 function readFileModel(p) {
@@ -209,7 +212,7 @@ async function stopTerminalSession(pid) {
 // ---------- dock-owned sessions ----------
 let state = { sessions: [] };
 try { state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch {}
-const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(({ id, sessionId, cwd, label, mode, color, created, hidden, kind, cmd, log, launcher }) => ({ id, sessionId, cwd, label, mode, color, created, hidden, kind, cmd, log, launcher })) }, null, 2));
+const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(({ id, sessionId, cwd, label, mode, color, created, hidden, kind, cmd, log, launcher, subject, subjectBy, reqs, reqsAt, logBase }) => ({ id, sessionId, cwd, label, mode, color, created, hidden, kind, cmd, log, launcher, subject, subjectBy, reqs, reqsAt, logBase })), tmeta: state.tmeta || {} }, null, 2));
 const procs = new Map(); // dock id -> {child, busy, perm, unread, err}
 
 const tpCache = new Map();
@@ -267,6 +270,7 @@ function onEvent(s, p, d) {
     p.busy = false; p.perm = null; p.unread = true;
   } else if (d.type === "result") {
     p.busy = false; p.perm = null; p.unread = true;
+    if (!s.spare) reqsSoon(s.id);
     if (d.is_error && d.result) p.err = String(d.result).slice(0, 300);
   }
   broadcast(s.id);
@@ -308,7 +312,7 @@ function startPipe(s) {
     const turn = s.log[s.log.length - 1];
     const ready = /(^|\n)\s*›\s*$/.test(p.out);
     turn.answer = p.out.replace(/(^|\n)\s*›\s*$/, "").replace(/^\s+|\s+$/g, "").slice(-20000);
-    if (ready) { p.busy = false; p.unread = true; p.out = ""; turn.end = Date.now(); saveState(); }
+    if (ready) { p.busy = false; p.unread = true; p.out = ""; turn.end = Date.now(); if (p.liveTok) turn.tok = p.liveTok; saveState(); reqsSoon(s.id); }
     broadcast(s.id);
   };
   child.stdout.on("data", onOut); child.stderr.on("data", onOut);
@@ -321,7 +325,7 @@ function sendPipe(s, text) {
   if (!p || p.child.exitCode !== null) p = startPipe(s);
   deadErr.delete(s.id);
   s.log.push({ user: text, answer: "", ts: Date.now() });
-  if (s.log.length > 60) s.log = s.log.slice(-60);
+  if (s.log.length > 60) { s.logBase = (s.logBase || 0) + s.log.length - 60; s.log = s.log.slice(-60); }   // keeps request turn numbers steady
   p.busy = true; p.unread = false; p.out = "";
   p.child.stdin.write(text.replace(/\n/g, " ") + "\n");
   saveState(); broadcast(s.id);
@@ -391,7 +395,7 @@ async function sendApi(s, text) {
       }
       if (Date.now() - last > 300) { last = Date.now(); broadcast(s.id); }
     });
-    res.on("end", () => { if (turn.end) return; turn.answer = turn.answer.replace(/^\s+/, "") || "(no answer)"; turn.tok = p.liveTok || 0; turn.end = Date.now(); p.busy = false; p.req = null; p.unread = true; if (sv) sv.lastUsed = Date.now(); saveState(); broadcast(s.id); });
+    res.on("end", () => { if (turn.end) return; turn.answer = turn.answer.replace(/^\s+/, "") || "(no answer)"; turn.tok = p.liveTok || 0; turn.model = l.model || l.label; turn.end = Date.now(); p.busy = false; p.req = null; p.unread = true; if (sv) sv.lastUsed = Date.now(); saveState(); broadcast(s.id); });
   });
   p.req = req; p.stop = () => { req.destroy(); fail((turn.answer ? turn.answer + "\n\n" : "") + "(stopped)"); deadErr.delete(s.id); };
   req.setTimeout(180e3, () => { req.destroy(); fail("The model went quiet for 3 minutes, so I stopped it."); });
@@ -480,7 +484,7 @@ function listSessions() {
     if (s.kind === "pipe" || s.kind === "api") {
       const status = p?.busy ? "cooking" : deadErr.get(s.id) ? "error" : p?.unread ? "answered" : "idle";
       const lt = [...(s.log || [])].reverse().find(t => t.answer || t.user);
-      out.push({ id: s.id, kind: "dock", local: true, label: s.label, color: s.color, title: s.kind === "api" ? null : p ? null : "not running",
+      out.push({ id: s.id, kind: "dock", local: true, label: s.label, color: s.color, title: s.kind === "api" ? null : p ? null : "not running", subject: subjectFor(s.id),
         status, last: lt ? (lt.answer || "you: " + lt.user).replace(/\s+/g, " ").slice(0, 140) : "", updated: lt?.end || lt?.ts || s.created, running: !!p });
       continue;
     }
@@ -489,7 +493,7 @@ function listSessions() {
     const m = f?.model;
     const ask = !p?.busy && !p?.perm ? askOf(lastAnswer(m)) : null;
     const status = p?.perm ? "needs" : p?.busy ? "cooking" : (p?.err || deadErr.get(s.id)) ? "error" : ask ? "yourturn" : p?.unread ? "answered" : "idle";
-    out.push({ id: s.id, kind: "dock", label: s.label, color: s.color, title: m?.title || null,
+    out.push({ id: s.id, kind: "dock", label: s.label, color: s.color, title: m?.title || null, subject: subjectFor(s.id),
       status, ask, last: lastLine(m), updated: f?.mtime || s.created, running: !!p });
   }
   // Terminal sessions: only ones whose Claude process is actually running right now.
@@ -500,7 +504,7 @@ function listSessions() {
     const tp = findTranscript(live.sessionId); if (!tp) continue;
     const f = readFileModel(tp); const m = f.model;
     const lab = labelFor(m.cwd || live.cwd);
-    out.push({ id: "t:" + live.sessionId, kind: "terminal", label: lab.label, color: lab.color, title: m.title,
+    out.push({ id: "t:" + live.sessionId, kind: "terminal", label: lab.label, color: lab.color, title: m.title, subject: subjectFor("t:" + live.sessionId),
       status: live.status === "busy" || (!live.status && now - f.mtime < LIVE_MS) ? "cooking" : "idle", last: lastLine(m), updated: f.mtime, live: true });
   }
   out.sort((a, b) => rank(a) - rank(b) || b.updated - a.updated);
@@ -552,6 +556,191 @@ function fullTurns(id) {
   const turns = f ? shapeTurns(f.model, !!p?.busy) : [];
   if (p?.busy && (!turns.length || !turns[turns.length - 1].open)) turns.push({ i: turns.length, user: p.pendingText || null, answer: null, work: [], open: true });
   return turns;
+}
+// ---------- subject bar + requests checklist (10/21) ----------
+// In long chats it is easy to forget what was asked for, and open chats were hard to tell apart.
+// Every chat gets a short subject (trimmed from the user's first real message at once, then refined ONCE by Haiku on the
+// subscription; a rename always wins), and a checklist of what he asked for, extracted by Haiku only when the user
+// has said something new since the last scan. Tokens and model per request are worked out here from the turns.
+const NOT_USER = /^\s*(\[Chat message, NOT from [^\]]*\]|Continue from handoff:|Moonstone fresh-chat handoff|MESSAGES FROM OTHER CHATS|<task-notification|<command-|\[Request interrupted)/;
+const isUser = t => typeof t === "string" && t.trim().length > 1 && !NOT_USER.test(t);
+const clip = (t, n) => { t = String(t || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n) + "…" : t; };
+function metaOf(id) {   // where a chat's subject + requests live: its dock session, or tmeta for a terminal chat
+  if (String(id).startsWith("t:")) { state.tmeta = state.tmeta || {}; const sid = id.slice(2); return state.tmeta[sid] || (state.tmeta[sid] = {}); }
+  return state.sessions.find(x => x.id === id) || null;
+}
+function tmetaCarry(sid) {   // a terminal chat moving into the dock keeps its subject and list
+  const t = state.tmeta?.[sid]; if (!t) return {}; delete state.tmeta[sid];
+  const { subject, subjectBy, reqs, reqsAt } = t; return { subject, subjectBy, reqs, reqsAt };
+}
+// the chat's turns in one shape, whatever kind it is: {user, answer, use: {model: tokens}} plus a stable numbering base
+const subCache = new Map();   // subagent file -> {size, use}
+function subagentUse(tp, model) {   // subagents' own token use, credited to the turn that started them
+  const dir = path.join(tp.replace(/\.jsonl$/, ""), "subagents"), out = [];
+  let names = []; try { names = fs.readdirSync(dir).filter(f => f.endsWith(".meta.json")); } catch { return out; }
+  for (const mf of names) {
+    const jf = path.join(dir, mf.replace(/\.meta\.json$/, ".jsonl"));
+    let st; try { st = fs.statSync(jf); } catch { continue; }
+    let c = subCache.get(jf);
+    if (!c || c.size !== st.size) {
+      let meta = {}; try { meta = JSON.parse(fs.readFileSync(path.join(dir, mf), "utf8")); } catch {}
+      const by = {};
+      try { for (const l of fs.readFileSync(jf, "utf8").split("\n")) {
+        if (!l.includes('"usage"')) continue; let j; try { j = JSON.parse(l); } catch { continue; }
+        const u = j.message?.usage; if (j.type !== "assistant" || !u || !j.message.id) continue;
+        by[j.message.id] = { m: j.message.model || meta.model || "", t: (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) };
+      } } catch {}
+      // no model in the transcript or meta: the model-choices log (one line per helper-agent launch) names it
+      if (Object.values(by).some(x => !x.m)) { let t0 = null; try { t0 = Date.parse(JSON.parse(fs.readFileSync(jf, "utf8").split("\n")[0]).timestamp); } catch {}
+        const ch = modelChoice(path.basename(tp, ".jsonl"), t0, meta.description); if (ch) for (const x of Object.values(by)) if (!x.m) x.m = ch; }
+      c = { size: st.size, tool: meta.toolUseId, model: meta.model, by }; subCache.set(jf, c);
+    }
+    const turn = c.tool != null ? model.toolTurn?.[c.tool] : undefined;
+    if (turn != null) out.push({ turn, by: c.by });
+  }
+  return out;
+}
+const CHOICES = path.join(HOME, ".claude", "model-choices.jsonl"); let choicesC = { size: -1, rows: [] };
+function modelChoice(sid, at, desc) {   // {ts, session, model, desc} lines written by the hook on every helper-agent launch
+  try { const st = fs.statSync(CHOICES); if (st.size !== choicesC.size) choicesC = { size: st.size, rows: fs.readFileSync(CHOICES, "utf8").split("\n").map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) }; } catch { return null; }
+  const rows = choicesC.rows.filter(r => r.session === sid && r.model);
+  const hit = (desc && rows.find(r => r.desc === desc)) || (at ? rows.filter(r => r.ts * 1000 <= at + 5000).sort((a, b) => b.ts - a.ts)[0] : null);
+  return hit ? hit.model : null;
+}
+function addUse(use, by) { for (const x of Object.values(by || {})) { const k = x.m || "?"; use[k] = (use[k] || 0) + x.t; } }
+function chatTurns(id, withUse) {
+  let tp = null, busy = false, s = null;
+  if (String(id).startsWith("t:")) {
+    const sid = id.slice(2); tp = findTranscriptCached(sid); if (!tp) return null;
+    const lv = liveTerminalSessions().find(x => x.sessionId === sid);
+    busy = lv ? lv.status === "busy" : false;
+  } else {
+    s = state.sessions.find(x => x.id === id); if (!s) return null;
+    const p = procs.get(id); busy = !!p?.busy;
+    if (s.kind === "pipe" || s.kind === "api") {
+      const lm = s.kind === "api" ? (launchers.find(x => x.id === s.launcher)?.model || s.label) : (s.fbModel || s.label);
+      return { busy, base: s.logBase || 0, kind: s.kind, turns: (s.log || []).map(t => ({ user: t.user, answer: t.answer, use: withUse && t.tok ? { [t.model || lm]: t.tok } : null })) };
+    }
+    tp = s.sessionId ? findTranscriptCached(s.sessionId) : null; if (!tp) return { busy, base: 0, kind: "claude", turns: [] };
+  }
+  const f = readFileModel(tp); if (!f) return null;
+  const turns = f.model.turns.map(t => {
+    const st = t.steps || []; let answer = null;
+    for (let j = st.length - 1; j >= 0; j--) if (st[j].k === "text" && st[j].text.trim()) { answer = st[j].text; break; }
+    let use = null; if (withUse) { use = {}; addUse(use, t.useBy); }
+    return { user: t.user, answer, use };
+  });
+  if (withUse) for (const a of subagentUse(tp, f.model)) if (turns[a.turn]) addUse(turns[a.turn].use, a.by);
+  return { busy, base: 0, kind: "claude", turns };
+}
+const HAIKU_Q = []; let haikuBusy = false;
+function haiku(prompt, timeout = 90e3) { return new Promise(done => { HAIKU_Q.push({ prompt, timeout, done }); haikuNext(); }); }
+function haikuNext() {   // one cheap claude -p at a time, on the subscription; no hooks, tools, MCP or saved session
+  if (haikuBusy || !HAIKU_Q.length) return;
+  const job = HAIKU_Q.shift();
+  if (!CLAUDE) { job.done(null); return haikuNext(); }
+  haikuBusy = true;
+  const E = WIN ? '""' : "";   // an empty argument has to survive cmd.exe on the PC
+  const args = ["-p", "--model", "haiku", "--no-session-persistence", "--setting-sources", E, "--strict-mcp-config", "--tools", E, "--disable-slash-commands"];
+  const env = { ...process.env }; delete env.CLAUDE_SESSION_LABEL; delete env.MOONSTONE_PORT;
+  if (!WIN) env.PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+  let out = "", fin = false, timer = null, child = null;
+  const end = v => { if (fin) return; fin = true; clearTimeout(timer); haikuBusy = false; job.done(v); haikuNext(); };
+  try { child = spawn(CLAUDE, args, { cwd: os.tmpdir(), env, stdio: ["pipe", "pipe", "ignore"], windowsHide: true, shell: WIN && /\.cmd$/i.test(CLAUDE) }); } catch { return end(null); }
+  timer = setTimeout(() => { try { child.kill(); } catch {} end(null); }, job.timeout);
+  child.stdout.on("data", c => (out += c));
+  child.on("error", () => end(null));
+  child.on("exit", code => end(code === 0 && out.trim() ? out.trim() : null));
+  child.stdin.on("error", () => {}); child.stdin.end(job.prompt);
+}
+function trimSubject(t) {
+  t = String(t).replace(/```[\s\S]*?```/g, " ").replace(/https?:\/\/\S+/g, " ").replace(/[`*_#>\[\]"]/g, "").replace(/\s+/g, " ").trim();
+  const w = t.split(" ").slice(0, 6).join(" ").replace(/[,.;:!?\-–—]+$/, "").slice(0, 60);
+  return w ? w.charAt(0).toUpperCase() + w.slice(1) : null;
+}
+const subjRun = new Set();
+function refineSubject(id, text) {   // once per chat: "auto" -> "ai" (Haiku's) or "trim" (kept the trimmed words)
+  const m = metaOf(id); if (!m || m.subjectBy !== "auto" || subjRun.has(id)) return;
+  subjRun.add(id);
+  haiku("Give a 3-6 word subject line for a chat that starts with:\n\n" + clip(text, 1500) + "\n\nReply with only the subject: no quotes, no trailing punctuation.", 60e3).then(out => {
+    subjRun.delete(id);
+    const m2 = metaOf(id); if (!m2 || m2.subjectBy !== "auto") return;   // renamed by hand meanwhile: that wins
+    const t = String(out || "").split("\n").map(x => x.replace(/^\s*subject:\s*/i, "").replace(/^["'*\s]+|["'*.\s]+$/g, "")).find(Boolean);
+    if (t && t.length <= 70 && t.split(/\s+/).length <= 9) { m2.subject = t; m2.subjectBy = "ai"; } else m2.subjectBy = "trim";
+    saveState(); broadcast(id);
+  });
+}
+function subjectFor(id) {
+  const m = metaOf(id); if (!m) return null;
+  if (m.subject && m.subjectBy !== "auto") return m.subject;
+  const c = chatTurns(id); const first = c && c.turns.find(t => isUser(t.user));
+  if (!first) return m.subject || null;
+  if (!m.subject) { m.subject = trimSubject(first.user); m.subjectBy = "auto"; saveState(); }
+  if (m.subject) refineSubject(id, first.user);
+  return m.subject || null;
+}
+// ---- requests ----
+const reqsRun = new Set(), reqsTimers = new Map();
+function reqsSoon(id, ms = 20e3) { clearTimeout(reqsTimers.get(id)); reqsTimers.set(id, setTimeout(() => { reqsTimers.delete(id); reqsScan(id); }, ms)); }
+function reqsFresh(m, c) { const at = m.reqsAt || 0; return c.turns.map((t, i) => ({ ...t, n: c.base + i })).filter(t => t.n >= at); }
+async function reqsScan(id) {
+  const m = metaOf(id); if (!m || reqsRun.has(id)) return;
+  const c = chatTurns(id); if (!c || c.busy) return;   // a working chat is scanned when its turn ends
+  const fresh = reqsFresh(m, c);
+  if (!fresh.some(t => isUser(t.user))) return;        // nothing new from the user: no model call
+  if (!CLAUDE) { m.reqsErr = "unavailable"; return; }
+  reqsRun.add(id); broadcast(id);
+  try {
+    let list = Array.isArray(m.reqs) ? m.reqs : [];
+    for (let k = 0; k < fresh.length; k += 60) {
+      const part = fresh.slice(k, k + 60);
+      const next = await reqsAsk(list, part);
+      if (!next) { m.reqsErr = "couldn't update"; saveState(); return; }
+      list = next; m.reqs = list; m.reqsAt = part[part.length - 1].n + 1; m.reqsErr = null; saveState();
+    }
+  } finally { reqsRun.delete(id); broadcast(id); }
+}
+async function reqsAsk(list, turns) {
+  const lines = turns.map(t => (isUser(t.user) ? `Turn ${t.n} USER: ${clip(t.user, 500)}` : t.user ? `Turn ${t.n} (automated message, not from the user): ${clip(t.user, 100)}` : `Turn ${t.n}`)
+    + (t.answer ? `\nTurn ${t.n} ASSISTANT: ${clip(t.answer, 400)}` : "")).join("\n\n");
+  const prompt = "You keep a checklist of the requests the user made in a chat with their AI assistant.\n\n" +
+    "The checklist so far (JSON):\n" + JSON.stringify(list.map(r => ({ text: r.text, askedTurn: r.askedTurn, doneTurn: r.doneTurn, status: r.status }))) + "\n\n" +
+    "New turns of the chat (shortened):\n\n" + lines + "\n\n" +
+    "Update the checklist. Add each distinct thing the user asked to be done in the new turns, as a short 3-8 word label (skip thanks, ok, " +
+    "small talk, and messages that only answer the assistant's question). Keep every earlier item, and mark it done if the new turns finished it. " +
+    "status is \"done\" (the assistant did it), \"waiting\" (the assistant is waiting on the user for it) or \"open\" (not done yet). " +
+    "askedTurn is the turn the user asked in; doneTurn is the turn whose reply finished it, or null.\n" +
+    "Reply with ONLY the JSON array: [{\"text\":\"...\",\"askedTurn\":0,\"doneTurn\":null,\"status\":\"open\"}]";
+  const out = await haiku(prompt, 150e3); if (!out) return null;
+  const j = out.match(/\[[\s\S]*\]/); if (!j) return null;
+  let arr; try { arr = JSON.parse(j[0]); } catch { return null; }
+  if (!Array.isArray(arr)) return null;
+  const int = v => Number.isInteger(v) ? v : (typeof v === "string" && /^\d+$/.test(v) ? +v : null);
+  return arr.filter(x => x && x.text).slice(0, 100).map(x => ({ text: clip(x.text, 90), askedTurn: int(x.askedTurn), doneTurn: int(x.doneTurn),
+    status: x.status === "done" ? "done" : x.status === "waiting" ? "waiting" : "open" }));
+}
+function modelFam(m) { const x = /opus|sonnet|haiku|fable/i.exec(String(m || "")); return x ? x[0].toLowerCase() : null; }
+function modelName(m) {   // claude ids -> Haiku/Sonnet/Opus/Fable; free/local ids -> a readable name
+  const f = modelFam(m); if (f) return f[0].toUpperCase() + f.slice(1);
+  const t = String(m || "").split("/").pop().replace(/:free$|\.gguf$/i, "").replace(/[-_]+/g, " ").trim();
+  return t ? t.replace(/\b[a-z]/g, x => x.toUpperCase()) : "?";
+}
+function costOf(c, r) {
+  const from = r.askedTurn ?? r.doneTurn, to = r.doneTurn ?? from; if (from == null) return {};
+  const fam = {};
+  for (let n = Math.max(from, c.base); n <= to; n++) { const t = c.turns[n - c.base]; if (!t?.use) continue;
+    for (const [k, v] of Object.entries(t.use)) { const nm = modelName(k); fam[nm] = (fam[nm] || 0) + v; } }
+  const e = Object.entries(fam).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  if (!e.length) return {};
+  return { tok: e.reduce((a, [, v]) => a + v, 0), model: e[0][0], more: e.length - 1 };
+}
+function reqsView(id) {
+  const m = metaOf(id); if (!m) return null;
+  const list = Array.isArray(m.reqs) ? m.reqs : [];
+  const c = chatTurns(id, list.some(r => r.status === "done"));
+  const items = list.map(r => ({ text: r.text, status: r.status, ...(r.status === "done" && c ? costOf(c, r) : {}) }));
+  const stale = !!c && reqsFresh(m, c).some(t => isUser(t.user));
+  return { items, busy: reqsRun.has(id), stale, err: !CLAUDE ? "unavailable" : m.reqsErr || null };
 }
 // ---------- background jobs (10/4) ----------
 // Long tasks an agent kicks off on this machine register themselves in ~/.claude/job-board
@@ -718,7 +907,7 @@ function sessionDetail(id) {
     const sid = id.slice(2); const tp = findTranscript(sid); if (!tp) return null;
     const f = readFileModel(tp); const lab = labelFor(f.model.cwd);
     const live = liveTerminalSessions().some(x => x.sessionId === sid);
-    return { id, kind: "terminal", label: lab.label, color: lab.color, title: f.model.title, cwd: f.model.cwd,
+    return { id, kind: "terminal", label: lab.label, color: lab.color, title: f.model.title, cwd: f.model.cwd, subject: subjectFor(id), reqs: reqsView(id),
       live, turns: lean(fullTurns(id)), jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) };
   }
   const s = state.sessions.find(x => x.id === id); if (!s || s.hidden) return null;   // ended = gone from every window
@@ -726,7 +915,7 @@ function sessionDetail(id) {
   if (p) p.unread = false;
   const tp = s.kind === "pipe" || s.kind === "api" ? null : findTranscript(s.sessionId); const f = tp ? readFileModel(tp) : null;
   const turns = lean(fullTurns(id));
-  return { id, kind: "dock", local: s.kind === "pipe" || s.kind === "api", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd,
+  return { id, kind: "dock", local: s.kind === "pipe" || s.kind === "api", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd, subject: subjectFor(id), reqs: reqsView(id),
     busy: !!p?.busy, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
     err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp),
     ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null };
@@ -1139,7 +1328,7 @@ const server = http.createServer(async (req, res) => {
         const sid = String(b.sessionId || ""); const tp = findTranscript(sid); if (!tp) return json(res, 404, { error: "not found" });
         const f = readFileModel(tp); const lab = labelFor(f.model.cwd); const l = launcherFor(f.model.cwd);
         let s = state.sessions.find(x => x.sessionId === sid);
-        if (!s) { s = { id: crypto.randomUUID().slice(0, 8), sessionId: sid, cwd: f.model.cwd || HOME, label: lab.label, mode: l?.mode || "default", color: lab.color, created: Date.now() }; state.sessions.push(s); }
+        if (!s) { s = { id: crypto.randomUUID().slice(0, 8), sessionId: sid, cwd: f.model.cwd || HOME, label: lab.label, mode: l?.mode || "default", color: lab.color, created: Date.now(), ...tmetaCarry(sid) }; state.sessions.push(s); }
         s.hidden = false; saveState(); broadcast(); return json(res, 200, { id: s.id });
       }
       // typing into a session that lives in a terminal window: quietly move it into the dock
@@ -1152,7 +1341,7 @@ const server = http.createServer(async (req, res) => {
         const tp = findTranscript(sid); if (!tp) return json(res, 404, { error: "not found" });
         const f = readFileModel(tp); const lab = labelFor(f.model.cwd); const l = launcherFor(f.model.cwd);
         let s = state.sessions.find(x => x.sessionId === sid);
-        if (!s) { s = { id: crypto.randomUUID().slice(0, 8), sessionId: sid, cwd: f.model.cwd || HOME, label: lab.label, mode: l?.mode || "default", color: lab.color, created: Date.now() }; state.sessions.push(s); }
+        if (!s) { s = { id: crypto.randomUUID().slice(0, 8), sessionId: sid, cwd: f.model.cwd || HOME, label: lab.label, mode: l?.mode || "default", color: lab.color, created: Date.now(), ...tmetaCarry(sid) }; state.sessions.push(s); }
         s.hidden = false; saveState(); send(s, text);
         return json(res, 200, { ok: true, id: s.id });
       }
@@ -1163,6 +1352,19 @@ const server = http.createServer(async (req, res) => {
         if (!live) return json(res, 404, { error: "that session isn't running" });
         await stopTerminalSession(live.pid);
         setTimeout(broadcast, 500); return json(res, 200, { ok: true });
+      }
+      // the subject bar: a rename always wins over the auto title; the requests list refreshes when it is opened
+      if (parts[1] === "session" && parts[2] && (parts[3] === "subject" || parts[3] === "reqs")) {
+        const id = decodeURIComponent(parts[2]);
+        const ok = id.startsWith("t:") ? !!findTranscriptCached(id.slice(2)) : !!state.sessions.find(x => x.id === id && !x.hidden);
+        if (!ok) return json(res, 404, { error: "not found" });
+        const m = metaOf(id);
+        if (parts[3] === "subject") {
+          const t = String(b.subject || "").replace(/\s+/g, " ").trim().slice(0, 80);
+          if (!t) return json(res, 400, { error: "empty" });
+          m.subject = t; m.subjectBy = "user"; saveState(); broadcast(id); return json(res, 200, { ok: true, subject: t });
+        }
+        reqsScan(id); return json(res, 200, { ok: true, reqs: reqsView(id) });
       }
       const s = state.sessions.find(x => x.id === parts[2]);
       if (!s) return json(res, 404, { error: "not found" });

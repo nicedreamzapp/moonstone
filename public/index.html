@@ -192,10 +192,23 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .rq i{font-style:normal;font-weight:700;text-align:center}
 .rq.ok i{color:var(--ok)} .rq.no i{color:var(--err)}
 .rq span{overflow-wrap:anywhere}
+.rq span em{display:block;font-style:normal;font-size:10.5px;color:var(--faint);margin-top:1px}   /* why it is a check or an X */
 .rq small{color:var(--faint);font-size:10.5px;white-space:nowrap;font-family:var(--mono)}
 .rq.no small{color:var(--dim);font-family:var(--sans)}
 .rq.wait small{color:#bfe0ff}
 .rq-note{font-size:11px;color:var(--faint);padding:4px 6px}
+.rq-retry{font-size:11px;color:#ffc2cc;text-decoration:underline;text-underline-offset:2px;padding:0}
+.sj-cur{min-width:0;flex:0 1 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:10.5px;color:var(--dim)}
+.sj-s{margin-left:auto}.sj-s+.sj-r{margin-left:0}
+/* Subjects: a slim panel down the left on desktop, a dropdown on the phone; only opens on tap */
+.sj-side{position:absolute;top:calc(100% + 4px);left:0;width:250px;max-height:calc(100vh - 220px);overflow-y:auto;padding:5px;border-radius:12px;
+  background:#0b0d1d;border:1px solid color-mix(in srgb,var(--c) 30%,var(--rim));box-shadow:0 12px 30px rgba(0,0,0,.6);scrollbar-width:thin;display:flex;flex-direction:column}
+.tp{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:baseline;text-align:left;padding:5px 7px;border-radius:8px;font-size:12px;color:var(--dim)}
+.tp+.tp{border-top:1px solid var(--rim2)}
+.tp:hover{background:rgba(255,255,255,.05);color:var(--fg)}
+.tp.cur{color:var(--fg)}
+.tp small{font-size:10.5px;color:var(--faint);white-space:nowrap}
+@media (max-width:700px){.sj-side{right:0;width:auto;max-height:min(55vh,420px)}}
 .c-title{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500}
 .c-title small{color:var(--dim);font-weight:400;margin-left:6px}
 .ghost{padding:5px 11px;border-radius:999px;border:1px solid var(--rim);font-size:12px;color:var(--dim);background:rgba(255,255,255,.03);white-space:nowrap}
@@ -437,26 +450,52 @@ setInterval(()=>{ for(const el of document.querySelectorAll(".job[data-job]")){ 
 setInterval(()=>{ if(openId && D?.jobs?.length && !document.hidden && !holdStill()) refresh(true).catch(()=>{}); }, 3000);
 // ---------- subject bar + requests checklist (10/21) ----------
 // Open chats are hard to tell apart, and in long chats it is easy to forget what was asked for.
-let reqOpen = null;   // chat id whose requests list is open
+let reqOpen = null, topOpen = null;   // chat id whose requests list / subjects panel is open
+const autoScan = new Set();            // chats this window already asked to read (once per open)
 const fmtTok = n => n >= 1e6 ? (n/1e6).toFixed(n >= 1e7 ? 0 : 1)+"M" : n >= 1000 ? Math.round(n/1000)+"k" : String(n);
+function fmtWhen(ts){ if(!ts) return ""; const d = new Date(ts), now = new Date();
+  return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : d.toLocaleDateString([], {month:"short", day:"numeric"}); }
 function subjHtml(d){
-  const r = d.reqs, items = r?.items || [], done = items.filter(x=>x.status==="done").length;
-  const pill = d.subject || items.length ? `<button class="sj-r${reqOpen===openId?" on":""}" id="sjr" title="Everything you asked for in this chat">Requests <b>${items.length||r?.busy||r?.stale ? done+"/"+items.length : "–"}</b></button>` : "";
+  const r = d.reqs || {}, items = r.items || [], done = items.filter(x=>x.status==="done").length, topics = r.topics || [];
+  // never "0/0": until a list exists the pill just says Requests
+  const pill = `<button class="sj-r${reqOpen===openId?" on":""}" id="sjr" title="Everything you asked for in this chat">Requests${items.length ? ` <b>${done}/${items.length}</b>` : ""}</button>`;
+  const spill = topics.length ? `<button class="sj-r sj-s${topOpen===openId?" on":""}" id="sjs" title="What this chat has covered, in order">Subjects <b>${topics.length}</b></button>` : "";
   let drop = "";
   if(reqOpen === openId){
     const rows = items.map(x=> x.status==="done"
-      ? `<div class="rq ok"><i>✓</i><span>${esc(x.text)}</span><small>${x.model ? esc(x.model)+(x.more?" +"+x.more:"")+(x.tok?" · ~"+fmtTok(x.tok)+" tok":"") : ""}</small></div>`
-      : `<div class="rq no${x.status==="waiting"?" wait":""}"><i>✗</i><span>${esc(x.text)}</span><small>${x.status==="waiting"?"waiting on you":"open"}</small></div>`).join("");
-    const note = r?.err === "unavailable" ? "The checklist isn't available on this machine." : r?.busy ? "Updating the list…" : r?.err ? "Couldn't update the list just now; showing the last one." : !items.length ? "No requests found yet." : "";
+      ? `<div class="rq ok"><i>✓</i><span>${esc(x.text)}${x.note?`<em>${esc(x.note)}</em>`:""}</span><small>${x.model ? esc(x.model)+(x.more?" +"+x.more:"")+(x.tok?" · ~"+fmtTok(x.tok)+" tok":"") : ""}</small></div>`
+      : `<div class="rq no${x.status==="waiting"?" wait":""}"><i>✗</i><span>${esc(x.text)}${x.note?`<em>${esc(x.note)}</em>`:""}</span><small>${x.status==="waiting"?"waiting on you":"open"}</small></div>`).join("");
+    const note = r.err === "unavailable" ? "The checklist isn't available on this machine."
+      : r.err ? `<button class="rq-retry" id="sjretry">Couldn't read this chat, tap to retry</button>`
+      : r.busy ? (r.has ? "Updating…" : "Reading this chat…")
+      : !r.has ? "Reading this chat…" : !items.length ? "No requests in this chat yet." : "";
     drop = `<div class="sj-drop">${rows}${note?`<div class="rq-note">${note}</div>`:""}</div>`;
   }
-  return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(d.subject || "New chat")}</button>${pill}${drop}`;
+  if(topOpen === openId && topics.length)
+    drop += `<div class="sj-side">${topics.map((t,k)=>`<button class="tp${k===topics.length-1?" cur":""}" data-topic="${t.i}"><span>${esc(t.title)}</span><small>${fmtWhen(t.ts)}</small></button>`).join("")}</div>`;
+  // no subject yet (old server, or the title is still being made): use the first real message, never a placeholder
+  const first = (d.turns||[]).map(t=>t.user||"").find(u=>u.trim() && !/^\[Chat message, NOT from [^\]]*\]|^<task-notification>|^Continue from handoff/.test(u)) || "";
+  const subj = d.subject || first.replace(/\s+/g," ").trim().split(" ").slice(0,7).join(" ");
+  // renamed by hand: the name stays, the current topic sits small beside it
+  const cur = topics.length ? topics[topics.length-1].title : "";
+  const side = r.renamed && cur && cur !== subj ? `<small class="sj-cur" title="What the chat is on now">${esc(cur)}</small>` : "";
+  return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(subj)}</button>${side}${spill}${pill}${drop}`;
 }
 function subjPaint(d){
-  const el = $("#csubj"); if(!el || $("#sjin")) return;   // never repaint under the user's typing
+  const el = $("#csubj"); if(!el || $("#sjin")) return;   // never repaint under typing
   const h = subjHtml(d); if(el.__h === h) return;
-  const dr = el.querySelector(".sj-drop"), sc = dr ? dr.scrollTop : 0;
-  el.innerHTML = h; el.__h = h; const nd = el.querySelector(".sj-drop"); if(nd) nd.scrollTop = sc;
+  const sc = [...el.querySelectorAll(".sj-drop,.sj-side")].map(x=>x.scrollTop);
+  el.innerHTML = h; el.__h = h; el.querySelectorAll(".sj-drop,.sj-side").forEach((x,k)=>{ x.scrollTop = sc[k]||0; });
+}
+async function reqsRead(id){   // ask the dock to read the chat; it only calls the model when there is something new
+  const r = await api(`/api/session/${encodeURIComponent(id)}/reqs`, {});
+  if(r && r.reqs && D && openId === id){ D.reqs = r.reqs; subjPaint(D); }
+}
+function topicGo(i){
+  topOpen = null; if(D) subjPaint(D);
+  const el = document.querySelector(`.msgs [data-ti="${i}"]`); const first = el && (el.firstElementChild || el);
+  if(first){ first.scrollIntoView({block:"start", behavior:"smooth"}); return; }
+  const box = $(".msgs"); if(box) box.scrollTop = 0; toast("That part is further back than this view loads");
 }
 function subjEdit(){
   const el = $("#csubj"); if(!el || $("#sjin")) return; const id = openId, was = D?.subject || "";
@@ -470,10 +509,10 @@ function subjEdit(){
   inp.addEventListener("blur", ()=>finish(true));
 }
 async function reqToggle(){
+  topOpen = null;
   if(reqOpen === openId){ reqOpen = null; return D && subjPaint(D); }
   reqOpen = openId; if(D) subjPaint(D);
-  const id = openId, r = await api(`/api/session/${encodeURIComponent(id)}/reqs`, {});   // cached list now, a refresh starts only if there is something new
-  if(r && r.reqs && D && openId === id){ D.reqs = r.reqs; subjPaint(D); }
+  reqsRead(openId);   // cached list now, a refresh starts only if there is something new (or the last read failed)
 }
 function renderConvo(keepScroll){
   const d = D; const c = MC[d.machine];
@@ -492,7 +531,7 @@ function renderConvo(keepScroll){
     } else if(t.answer || t.hasWork || t.work?.length){
       h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}</div>`;
     }
-    return h;
+    return `<div class="ti" data-ti="${t.i}" style="display:contents">${h}</div>`;   // topics scroll to their turn
   }).concat(pend.map(x=>`<div class="u">${esc(x.text)}</div>`));
   const turns = turnHtml.join("");
   let ask = "";
@@ -598,10 +637,12 @@ async function refresh(keepScroll=true){
   if(pointerHeld) return later();
   // The check above only runs BEFORE the fetch. A press that started while the answer was on its way still
   // got its button rebuilt underneath it, so check again right before drawing.
-  if(openId){ const id = openId; if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(id)); if(id !== openId) return; if(d.error){ openId=null; return refresh(); } D=d; if(pointerHeld) return later(); renderConvo(keepScroll); }
+  if(openId){ const id = openId; if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(id)); if(id !== openId) return; if(d.error){ openId=null; return refresh(); } D=d;
+    // a chat with something unread by the checklist: read it once on open, so the list and subjects fill without a tap
+    if(d.reqs?.stale && !d.reqs.busy && !d.reqs.err && !autoScan.has(id)){ autoScan.add(id); reqsRead(id); } if(pointerHeld) return later(); renderConvo(keepScroll); }
   else { const s = await api("/api/state"); if(openId) return; S = s; learnMachines(S); if(pointerHeld) return later(); renderList(); }
 }
-async function open(id){ reqOpen = null; openId=id; history.replaceState(null,"","#"+encodeURIComponent(id)); micSync(); await refresh(false); }
+async function open(id){ reqOpen = null; topOpen = null; openId=id; history.replaceState(null,"","#"+encodeURIComponent(id)); micSync(); await refresh(false); }
 function back(){ if(rec && rec.state==="recording") rec.stop(); openId=null; D=null; history.replaceState(null,"",location.pathname); micSync(); refresh(); }
 
 document.addEventListener("toggle", e=>{ const g=e.target.dataset?.g; if(!g) return;
@@ -640,7 +681,10 @@ document.addEventListener("click", async e=>{
     return r.id?open(r.id):refresh(); }
   if(t.closest("#sjt")) return subjEdit();
   if(t.closest("#sjr")) return reqToggle();
-  if(reqOpen && !t.closest(".sj-drop")){ reqOpen = null; if(D) subjPaint(D); }
+  if(t.closest("#sjretry")) return reqsRead(openId);
+  if(t.closest("#sjs")){ reqOpen = null; topOpen = topOpen===openId ? null : openId; return D && subjPaint(D); }
+  const tg = t.closest("[data-topic]"); if(tg) return topicGo(tg.dataset.topic);
+  if((reqOpen || topOpen) && !t.closest(".sj-drop,.sj-side")){ reqOpen = null; topOpen = null; if(D) subjPaint(D); }
   if(t.closest("#back")) return back();
   if(t.closest("#narr")) return narrToggle();
   if(t.closest("#send")){ if(rec){ if(rec.state === "recording") rec.stop(); return; } if(micUi.cls) return; return sendMsg(); }

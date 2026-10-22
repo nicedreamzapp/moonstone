@@ -17,41 +17,63 @@
 
 </div>
 
-## Why we built it
+<a id="why"></a>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s01-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s01-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s01-banner.svg" width="100%" alt="01. Why we built it. One window for every Claude Code session"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s01-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s01-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s01-r1.svg" width="100%" alt="One browser window. Every session on every machine, sorted so the ones that need you are on top. Hands-free. Send the next instruction by voice, and have answers read back. Nothing to install. One Node file, one HTML file. No npm dependencies, no build step, no cloud service."></picture>
 
-We run a lot of Claude Code sessions at once, on a couple of Macs and a Windows PC. Keeping track of which terminal was waiting on a permission prompt, which one had finished, and which machine had room for another job turned into a job of its own.
+🧭 **The problem** · We run a lot of Claude Code sessions at once, on a couple of Macs and a Windows PC. Keeping track of which terminal was waiting on a permission prompt, which one had finished, and which machine had room for another job turned into a job of its own.
 
-Moonstone puts all of it in one browser window. Every session on every machine shows up in one list, sorted so the ones that need you are on top. You can open any of them, read the answer, approve the next step, and send the next instruction by voice while your hands are busy with something else. Answers can be read back to you. Local models sit in the same list as Claude, so a quick question to a model on your own GPU is one tap away.
+✅ **What it gives you** · You can open any session, read the answer, approve the next step, and send the next instruction by voice while your hands are busy with something else.
 
-It is one Node file and one HTML file. No npm dependencies, no build step, no cloud service. It binds to `127.0.0.1` and machines reach each other over SSH tunnels you already trust.
+🧠 **Local models too** · Local models sit in the same list as Claude, so a quick question to a model on your own GPU is one tap away.
 
-## What it does
+🔒 **Private by design** · It binds to `127.0.0.1` and machines reach each other over SSH tunnels you already trust.
 
-### Every session, every machine, one list
+
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s01-rule.svg" width="100%" alt="">
+
+
+<a id="sessions"></a>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s02-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s02-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s02-banner.svg" width="100%" alt="02. Every session, every machine, one list. Grouped by machine, sorted by what needs you"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s02-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s02-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s02-r1.svg" width="100%" alt="Sorted by what needs you. Waiting on a permission prompt, then errors, then new answers, then working, then idle. Tidy by itself. Sessions you open but never use tidy themselves away after 30 minutes. Warm spares. One idle `claude` process per launcher, so a new session skips the startup wait."></picture>
+
+🖥️ **Grouped by machine** · Each machine has a live GPU gauge (macOS) and a RAM bar. RAM is measured the way Activity Monitor counts "Memory Used", so a model that is loaded but idle still shows up.
+
+🔀 **Two kinds of sessions** · *Dock* sessions are headless `claude -p` processes that Moonstone starts and owns. *Terminal* sessions are Claude Code processes already running in a terminal; Moonstone reads their transcripts, and typing into one stops the terminal copy and resumes the same conversation inside Moonstone with its full history.
+
+🚀 **Launchers** · Launchers start new sessions. A launcher that exists on several machines gets machine chips; the starred chip is the least busy machine (fewest sessions working, then lowest GPU, then your preferred order). Tap a chip to pin a launcher to a machine.
+
+⚡ **Why warm spares** · Loading MCP servers can take a while, so Moonstone keeps the spare ready.
+
 
 <img src="docs/img/sessions.png" alt="Session list grouped by machine with GPU and RAM gauges" width="380" align="right">
 
-- **Sessions grouped by machine**, each with a live GPU gauge (macOS) and a RAM bar. RAM is measured the way Activity Monitor counts "Memory Used", so a model that is loaded but idle still shows up.
-- **Sorted by what needs you**: waiting on a permission prompt, then errors, then new answers, then working, then idle.
-- **Two kinds of sessions.** *Dock* sessions are headless `claude -p` processes that Moonstone starts and owns. *Terminal* sessions are Claude Code processes already running in a terminal; Moonstone reads their transcripts, and typing into one stops the terminal copy and resumes the same conversation inside Moonstone with its full history.
-- **Launchers** start new sessions. A launcher that exists on several machines gets machine chips; the starred chip is the least busy machine (fewest sessions working, then lowest GPU, then your preferred order). Tap a chip to pin a launcher to a machine.
-- **Warm spares.** Moonstone keeps one idle `claude` process ready per launcher, so a new session skips the startup wait (loading MCP servers can take a while).
-- Sessions you open but never use tidy themselves away after 30 minutes.
-
 <br clear="right">
 
-### Conversations, approvals and the work behind each answer
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s02-rule.svg" width="100%" alt="">
+
+
+<a id="conversations"></a>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s03-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s03-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s03-banner.svg" width="100%" alt="03. Conversations and approvals. The work behind each answer"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s03-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s03-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s03-r1.svg" width="100%" alt="End. **End** stops the session&#x27;s process and removes it from every open window, on every machine. Older turns. Older turns load their work only when you open it. Reload. The page reloads itself when `public/index.html` changes, but waits until your message box is empty."></picture>
+
+🔐 **Permission prompts** · Permission prompts arrive as an Allow / Don't card. Moonstone runs Claude Code with `--permission-prompt-tool stdio`, so it answers the real prompt; nothing is auto-approved. Questions Claude asks with options (`AskUserQuestion`) show up as buttons.
+
+📂 **The work folds away** · Each answer shows the final text; the tool calls behind it sit under a "Show the work · 5 steps · 2m 22s" bar.
+
+🔵 **Your turn** · When the latest answer ends by asking you something, the session gets a pulsing blue YOUR TURN badge in the list, sorted right under NEEDS YOU, with "Waiting on you:" and the question as its last line. Inside the chat, a banner quoting the question sits above the message box, and the tab title starts with "● Your turn", so you can tell from another window.
+
+⏳ **Background work stays visible** · When Claude starts a background agent, a `run_in_background` command or a monitor, a card pinned to the bottom of the chat shows it until it finishes. The card has a pulsing dot, its latest step ("Reading huggingface.co/...", or the last line of the command's output) with how long ago that changed, a progress bar, and an ETA with a finish time that ticks every second. Moonstone reads all of this from the session transcript, so nothing has to be registered. The ETA comes from a `~5m` hint in the task description if there is one, otherwise from the median time of past tasks of the same kind (kept in `bg-history.json`). A long script running outside a session can report its own progress with `tools/job start <id> "what it's doing" --total N`, `tools/job tick <id> <done>` and `tools/job done <id>`.
+
 
 <img src="docs/img/permission.png" alt="A session asking permission to run a command, with Allow and Don't buttons" width="100%">
 
-- **Permission prompts** arrive as an Allow / Don't card. Moonstone runs Claude Code with `--permission-prompt-tool stdio`, so it answers the real prompt; nothing is auto-approved. Questions Claude asks with options (`AskUserQuestion`) show up as buttons.
-- **The work folds away.** Each answer shows the final text; the tool calls behind it sit under a "Show the work · 5 steps · 2m 22s" bar. Older turns load their work only when you open it.
-- **Your turn.** When the latest answer ends by asking you something, the session gets a pulsing blue YOUR TURN badge in the list, sorted right under NEEDS YOU, with "Waiting on you:" and the question as its last line. Inside the chat, a banner quoting the question sits above the message box, and the tab title starts with "● Your turn", so you can tell from another window.
-- **Background work stays visible.** When Claude starts a background agent, a `run_in_background` command or a monitor, a card pinned to the bottom of the chat shows it until it finishes. The card has a pulsing dot, its latest step ("Reading huggingface.co/...", or the last line of the command's output) with how long ago that changed, a progress bar, and an ETA with a finish time that ticks every second. Moonstone reads all of this from the session transcript, so nothing has to be registered. The ETA comes from a `~5m` hint in the task description if there is one, otherwise from the median time of past tasks of the same kind (kept in `bg-history.json`). A long script running outside a session can report its own progress with `tools/job start <id> "what it's doing" --total N`, `tools/job tick <id> <done>` and `tools/job done <id>`.
-- **End** stops the session's process and removes it from every open window, on every machine.
-- The page reloads itself when `public/index.html` changes, but waits until your message box is empty.
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s03-rule.svg" width="100%" alt="">
 
-### Voice in, voice out
+
+<a id="voice"></a>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s04-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s04-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s04-banner.svg" width="100%" alt="04. Voice in, voice out. Push to talk, and answers read back"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s04-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s04-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s04-r1.svg" width="100%" alt="Push to talk. Tap the mic, talk, tap again to send. Enter does the same. Narration. Tap the speaker and every finished answer is read aloud. Stays local. Transcription and speech run on your own machines."></picture>
 
 <img src="docs/img/conversation.png" alt="Conversation with the narration speaker on and the mic listening" width="100%">
 
@@ -63,7 +85,16 @@ It is one Node file and one HTML file. No npm dependencies, no build step, no cl
 
 **Narration.** Tap the speaker in a conversation and every answer that finishes from then on is read aloud. The server sends the text, split into sentences, to a local TTS server (Kokoro, voice `af_heart` by default) and plays the WAVs back in order. Code blocks are skipped and links become "a link". With Moonstone open on several machines, only the window you touched last speaks. Tap the mic to cut it off mid sentence. Local-model chats get one more step first: their answers tend to read like a log file, so the server has a small local model (`speak` in config.json) rewrite each one as a few plain spoken sentences, then strips any file paths, ports, ids and long numbers that are left. With no `speak` model set, the strip step runs alone.
 
-### Local models in the same list
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s04-rule.svg" width="100%" alt="">
+
+
+<a id="local-models"></a>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s05-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s05-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s05-banner.svg" width="100%" alt="05. Local models and how it fits together. Same list as Claude, one server per machine"></picture>
+
+💤 **Idle shutdown** · Local models are memory hungry, so a `pipe` chat or a server Moonstone started is shut down after 30 idle minutes and comes back on the next message.
+
+🧩 **Same server everywhere** · Every machine runs the same `server.js`.
+
 
 | Launcher kind | What it runs |
 |---|---|
@@ -73,8 +104,6 @@ It is one Node file and one HTML file. No npm dependencies, no build step, no cl
 | `open` | Opens an app on that machine. |
 
 Local models are memory hungry, so a `pipe` chat or a server Moonstone started is shut down after **30 idle minutes** and comes back on the next message.
-
-## How it fits together
 
 ```mermaid
 flowchart LR
@@ -111,7 +140,12 @@ flowchart LR
 
 Every machine runs the same `server.js`. The one you open in the browser lists its peers in `config.json`, polls each peer's `/api/local`, relays their change events, and forwards any request for a session named `<peer>~<id>` to that peer. Transcripts are read from `~/.claude/projects/**/<session>.jsonl` incrementally, so a dock session and a terminal session look the same.
 
-## Quick start
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s05-rule.svg" width="100%" alt="">
+
+
+<a id="quick-start"></a>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s06-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s06-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s06-banner.svg" width="100%" alt="06. Quick start and configuration. Node 18 or newer, no build step"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s06-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s06-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s06-r1.svg" width="100%" alt="Node 18+. Plus Claude Code installed. Open localhost:8899. Set `DOCK_PORT` to use another port. Try the demo. `node tools/demo-server.js` serves the real UI on http://localhost:8890 with made-up sessions."></picture>
 
 You need Node 18 or newer and [Claude Code](https://docs.claude.com/en/docs/claude-code) installed.
 
@@ -164,7 +198,9 @@ Dictation itself must be turned on in System Settings > Keyboard. The helper acc
 - `pipe` launchers are started with `/bin/bash`, so on Windows use `api` launchers (llama-server, Ollama) for local models.
 - The GPU gauge is macOS only; RAM works everywhere.
 
-## Configuration
+<a id="configuration"></a>
+
+### Configuration
 
 Everything lives in `config.json` next to `server.js`. All keys are optional. See [`config.example.json`](config.example.json).
 
@@ -182,7 +218,12 @@ Everything lives in `config.json` next to `server.js`. All keys are optional. Se
 | `remoteOrigins` | Origins allowed to call `/api/dictate` cross-origin, for when you serve the page from somewhere else. Empty by default. |
 | `oneWindowTerminals` | Terminal app names that run one process per window; their window is closed when a session moves into Moonstone. |
 
-## Security model
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s06-rule.svg" width="100%" alt="">
+
+
+<a id="security-model"></a>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s07-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s07-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s07-banner.svg" width="100%" alt="07. Security, layout and license. Deliberately boring about access"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s07-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s07-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s07-r1.svg" width="100%" alt="Loopback only. The server listens on `127.0.0.1`. Other machines use SSH tunnels. Approvals stay with you. Prompts come to the window instead of being auto-accepted. Audio stays local. Temporary audio files are deleted after each transcription."></picture>
 
 Moonstone can run commands on your machines, so it is deliberately boring about access:
 
@@ -193,7 +234,7 @@ Moonstone can run commands on your machines, so it is deliberately boring about 
 - **Audio stays local.** Transcription and speech run on your own machines. Temporary audio files are deleted after each transcription.
 - If you put Moonstone behind a reverse proxy, have the proxy add `X-Via-Proxy: 1`. Moonstone then treats those windows as remote: they will not press dictation keys on a screen you are not sitting at, and they will not be pulled to sessions started from local launchers.
 
-## Project layout
+### Project layout
 
 ```
 server.js              the whole backend: sessions, peers, voice, HTTP + SSE
@@ -206,6 +247,9 @@ icon/                  app icons and the Python scripts that draw them
 docs/                  the project website (GitHub Pages)
 ```
 
-## License
+### License
 
 [MIT](LICENSE)
+
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/assets/readme/s07-rule.svg" width="100%" alt="">
+

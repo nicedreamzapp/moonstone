@@ -191,6 +191,7 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .rq+.rq{border-top:1px solid var(--rim2)}
 .rq i{font-style:normal;font-weight:700;text-align:center}
 .rq.ok i{color:var(--ok)} .rq.no i{color:var(--err)}
+.rq.sent{color:var(--dim)} .rq.sent i{color:var(--faint);font-weight:400} .rq.sent small{color:var(--faint);font-family:var(--sans)}
 .rq span{overflow-wrap:anywhere}
 .rq span em{display:block;font-style:normal;font-size:10.5px;color:var(--faint);margin-top:1px}   /* why it is a check or an X */
 .rq small{color:var(--faint);font-size:10.5px;white-space:nowrap;font-family:var(--mono)}
@@ -457,12 +458,15 @@ function fmtWhen(ts){ if(!ts) return ""; const d = new Date(ts), now = new Date(
   return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : d.toLocaleDateString([], {month:"short", day:"numeric"}); }
 function subjHtml(d){
   const r = d.reqs || {}, items = r.items || [], done = items.filter(x=>x.status==="done").length, topics = r.topics || [];
+  const counted = items.filter(x=>x.status!=="sent").length;   // handed to another chat: not this chat's to finish
   // never "0/0": until a list exists the pill just says Requests
-  const pill = `<button class="sj-r${reqOpen===openId?" on":""}" id="sjr" title="Everything you asked for in this chat">Requests${items.length ? ` <b>${done}/${items.length}</b>` : ""}</button>`;
+  const pill = `<button class="sj-r${reqOpen===openId?" on":""}" id="sjr" title="Everything you asked for in this chat">Requests${counted ? ` <b>${done}/${counted}</b>` : ""}</button>`;
   const spill = topics.length ? `<button class="sj-r sj-s${topOpen===openId?" on":""}" id="sjs" title="What this chat has covered, in order">Subjects <b>${topics.length}</b></button>` : "";
   let drop = "";
   if(reqOpen === openId){
-    const rows = items.map(x=> x.status==="done"
+    const rows = items.map(x=> x.status==="sent"
+      ? `<div class="rq sent"><i>→</i><span>${esc(x.text)}${x.note?`<em>${esc(x.note)}</em>`:""}</span><small>sent</small></div>`
+      : x.status==="done"
       ? `<div class="rq ok"><i>✓</i><span>${esc(x.text)}${x.note?`<em>${esc(x.note)}</em>`:""}</span><small>${x.model ? esc(x.model)+(x.more?" +"+x.more:"")+(x.tok?" · ~"+fmtTok(x.tok)+" tok":"") : ""}</small></div>`
       : `<div class="rq no${x.status==="waiting"?" wait":""}"><i>✗</i><span>${esc(x.text)}${x.note?`<em>${esc(x.note)}</em>`:""}</span><small>${x.status==="waiting"?"waiting on you":"open"}</small></div>`).join("");
     const note = r.err === "unavailable" ? "The checklist isn't available on this machine."

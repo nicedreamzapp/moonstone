@@ -687,8 +687,18 @@ const reqsRun = new Set(), reqsTimers = new Map();
 function reqsSoon(id, ms = 20e3) { clearTimeout(reqsTimers.get(id)); reqsTimers.set(id, setTimeout(() => { reqsTimers.delete(id); reqsScan(id); }, ms)); }
 // turns not scanned yet; while the chat is working its open (last) turn is left out and read next time
 function reqsFresh(m, c) { const at = m.reqsAt || 0, last = c.turns.length - (c.busy ? 1 : 0); return c.turns.slice(0, Math.max(0, last)).map((t, i) => ({ ...t, n: c.base + i })).filter(t => t.n >= at); }
-const needFix = m => Array.isArray(m.reqs) && !m.reqsFix && m.reqs.some(r => r.status !== "done");
-async function reqsFixPass(m, c) {   // the open items, checked once against every later turn (finishes that came many turns later were missed)
+async function otherChats(id) {
+  const out = [];
+  try { for (const x of listSessions()) if (x.id !== id && x.subject) out.push(CONFIG.name + " · " + x.subject); } catch {}
+  for (const peer of CONFIG.peers || []) { const r = await peerState(peer).catch(() => null);
+    for (const x of (r && r.code === 200 && r.body.sessions) || []) if (x.subject) out.push((peer.name || peer.id) + " · " + x.subject); }
+  return out.slice(0, 30);
+}
+const SENT_RULE = "\"sent\" means the request was handed to another chat instead of being done here: the reply says it was forwarded (chat-send, " +
+  "\"passed it to the ... chat\", \"told the other chat\") or the request clearly belongs to one of the other live chats listed. Its note names where, " +
+  "like \"sent to Laptop · Release notes\".";
+const needFix = m => Array.isArray(m.reqs) && !((m.reqsFix === true ? 1 : m.reqsFix || 0) >= 2) && m.reqs.some(r => r.status !== "done");   // 2 = re-checked with "sent"
+async function reqsFixPass(m, c, others) {   // the open items, checked once against every later turn (finishes that came many turns later were missed)
   const open = m.reqs.map((r, k) => ({ ...r, k })).filter(r => r.status !== "done"); if (!open.length) return true;
   const from = Math.min(...open.map(r => r.askedTurn ?? 0));
   const turns = c.turns.slice(0, c.turns.length - (c.busy ? 1 : 0)).map((t, i) => ({ ...t, n: c.base + i })).filter(t => t.n >= from && t.n < (m.reqsAt ?? Infinity));
@@ -700,32 +710,37 @@ async function reqsFixPass(m, c) {   // the open items, checked once against eve
     const still = open.filter(r => m.reqs[r.k].status !== "done"); if (!still.length) break;
     const lines = part.map(t => (isUser(t.user) ? `Turn ${t.n} USER: ${clip(t.user, 300)}` : `Turn ${t.n}`) + (t.answer ? `\nTurn ${t.n} ASSISTANT: ${clip(t.answer, 400)}` : "")).join("\n\n");
     const prompt = "These requests from the user are marked not done:\n" + JSON.stringify(still.map(r => ({ id: r.k, text: r.text, askedTurn: r.askedTurn }))) + "\n\n" +
+      "Other live chats: " + (others.length ? others.join("; ") : "none") + "\n\n" +
       "Chat turns (shortened):\n\n" + lines + "\n\n" +
       "For each request decide if it is done: done if ANY assistant reply after it was asked says it was built, pushed, installed, live, fixed or done, even many turns later, " +
       "or if the user confirms it. \"drop\" if it was only a question, chit-chat, a duplicate of another request, or superseded by a later request. " +
-      "Reply with ONLY JSON: [{\"id\":0,\"status\":\"done|open|waiting|drop\",\"doneTurn\":null,\"note\":\"under 8 words\"}]";
+      SENT_RULE + " " +
+      "Reply with ONLY JSON: [{\"id\":0,\"status\":\"done|open|waiting|sent|drop\",\"doneTurn\":null,\"note\":\"under 8 words\"}]";
     const out = await haiku(prompt, 150e3); if (!out) return false;
     const j = out.match(/\[[\s\S]*\]/); if (!j) return false;
     let arr; try { arr = JSON.parse(j[0]); } catch { return false; }
     for (const x of Array.isArray(arr) ? arr : []) {
       const r = m.reqs[x?.id]; if (!r || !still.some(o => o.k === x.id)) continue;
       if (x.status === "drop") r.drop = true;
-      else if (["done", "open", "waiting"].includes(x.status)) { r.status = x.status; if (Number.isInteger(x.doneTurn)) r.doneTurn = x.doneTurn; }
+      else if (["done", "open", "waiting", "sent"].includes(x.status)) { r.status = x.status; if (Number.isInteger(x.doneTurn)) r.doneTurn = x.doneTurn; }
       if (x.note) r.note = clip(x.note, 50);
     }
   }
   m.reqs = m.reqs.filter(r => !r.drop);
   return true;
 }
+const needTopics = m => Array.isArray(m.reqs) && !(Array.isArray(m.topics) && m.topics.length) && !m.topicsTried;   // a list made before topics existed
 async function reqsScan(id) {
   const m = metaOf(id); if (!m || reqsRun.has(id)) return;
   const c = chatTurns(id); if (!c) return;
+  if (needTopics(m)) { m.topicsTried = true; m.reqsAt = 0; }   // read the whole chat once more so its subjects fill in
   const fresh = reqsFresh(m, c);
   if (!fresh.some(t => isUser(t.user)) && !needFix(m)) return;        // nothing new from the user: no model call
   if (!CLAUDE) { m.reqsErr = "unavailable"; return; }
   reqsRun.add(id); m.reqsErr = null; broadcast(id);
   try {
-    if (needFix(m)) { if (!(await reqsFixPass(m, c))) { m.reqsErr = "failed"; saveState(); return; } m.reqsFix = true; saveState(); broadcast(id); }
+    const others = await otherChats(id);
+    if (needFix(m)) { if (!(await reqsFixPass(m, c, others))) { m.reqsErr = "failed"; saveState(); return; } m.reqsFix = 2; saveState(); broadcast(id); }
     if (!fresh.some(t => isUser(t.user))) return;
     // chunks of about 60k characters, so even a long old chat fills in a call or two
     const chunks = []; let cur = [], size = 0;
@@ -733,26 +748,27 @@ async function reqsScan(id) {
       if (cur.length && size + n > 60000) { chunks.push(cur); cur = []; size = 0; } cur.push(t); size += n; }
     if (cur.length) chunks.push(cur);
     for (const part of chunks) {
-      const next = await reqsAsk(Array.isArray(m.reqs) ? m.reqs : [], Array.isArray(m.topics) ? m.topics : [], part);
+      const next = await reqsAsk(Array.isArray(m.reqs) ? m.reqs : [], Array.isArray(m.topics) ? m.topics : [], part, others);
       if (!next) { m.reqsErr = "failed"; saveState(); return; }
-      if (!Array.isArray(m.reqs)) m.reqsFix = true;
+      if (!Array.isArray(m.reqs)) m.reqsFix = 2;
       m.reqs = next.reqs; if (next.topics.length) m.topics = next.topics; m.reqsAt = part[part.length - 1].n + 1; m.reqsErr = null; saveState(); broadcast(id);
     }
   } finally { reqsRun.delete(id); broadcast(id); }
 }
-async function reqsAsk(list, topics, turns) {
+async function reqsAsk(list, topics, turns, others = []) {
   const lines = turns.map(t => (isUser(t.user) ? `Turn ${t.n} USER: ${clip(t.user, 400)}` : t.user ? `Turn ${t.n} (automated message, not from the user): ${clip(t.user, 80)}` : `Turn ${t.n}`)
     + (t.answer ? `\nTurn ${t.n} ASSISTANT: ${clip(t.answer, 260)}` : "")).join("\n\n");
   const prompt = "You keep two lists for a chat between the user and their AI assistant: the requests the user made, and the topics the chat moved through.\n\n" +
     "Requests so far (JSON):\n" + JSON.stringify(list.map(r => ({ text: r.text, askedTurn: r.askedTurn, doneTurn: r.doneTurn, status: r.status, note: r.note || "" }))) + "\n\n" +
     "Topics so far (JSON):\n" + JSON.stringify(topics.map(t => ({ title: t.title, startTurn: t.startTurn }))) + "\n\n" +
+    "Other live chats: " + (others.length ? others.join("; ") : "none") + "\n\n" +
     "New turns of the chat (shortened):\n\n" + lines + "\n\n" +
     "Update both lists.\n" +
     "requests: add each distinct thing the user asked to be done in the new turns, as a short 3-8 word label (skip thanks, ok, small talk, and messages that only answer " +
     "the assistant's question). Keep every earlier item. An item is done if ANY later assistant reply says it was built, pushed, installed, live, fixed or done, " +
     "even many turns after it was asked, or if the user confirms it; check every open item against every new turn. Merge duplicates and near-duplicates into one item. " +
     "Drop items that were only questions, chit-chat, or superseded by a later request. status is \"done\" (the assistant did it), " +
-    "\"waiting\" (the assistant is waiting on the user for it) or \"open\" (not done yet). askedTurn is the turn the user asked in; doneTurn is the turn whose reply finished it, or null. " +
+    "\"waiting\" (the assistant is waiting on the user for it), \"sent\" (handed to another chat, see below) or \"open\" (not done yet). " + SENT_RULE + " askedTurn is the turn the user asked in; doneTurn is the turn whose reply finished it, or null. " +
     "note is a short reason under 8 words, e.g. \"pushed and live on M5\" or \"waiting on the user's OK\".\n" +
     "topics: keep the earlier topics; add a new one only when the chat really changes subject, as a 3-6 word title and the turn it started. The first topic starts at the chat's first turn.\n" +
     "Reply with ONLY this JSON: {\"requests\":[{\"text\":\"...\",\"askedTurn\":0,\"doneTurn\":null,\"status\":\"open\",\"note\":\"...\"}],\"topics\":[{\"title\":\"...\",\"startTurn\":0}]}";
@@ -762,7 +778,7 @@ async function reqsAsk(list, topics, turns) {
   if (!o || !Array.isArray(o.requests)) return null;
   const int = v => Number.isInteger(v) ? v : (typeof v === "string" && /^\d+$/.test(v) ? +v : null);
   const reqs = o.requests.filter(x => x && x.text).slice(0, 100).map(x => ({ text: clip(x.text, 90), askedTurn: int(x.askedTurn), doneTurn: int(x.doneTurn),
-    status: x.status === "done" ? "done" : x.status === "waiting" ? "waiting" : "open", note: x.note ? clip(x.note, 50) : "" }));
+    status: ["done", "waiting", "sent"].includes(x.status) ? x.status : "open", note: x.note ? clip(x.note, 50) : "" }));
   const tops = (Array.isArray(o.topics) ? o.topics : []).filter(x => x && x.title).slice(0, 40).map(x => ({ title: clip(String(x.title).replace(/^["'*\s]+|["'*.\s]+$/g, ""), 60), startTurn: int(x.startTurn) ?? 0 }))
     .sort((a, b) => a.startTurn - b.startTurn);
   return { reqs, topics: tops };
@@ -787,7 +803,7 @@ function reqsView(id) {
   const list = Array.isArray(m.reqs) ? m.reqs : [];
   const c = chatTurns(id, list.some(r => r.status === "done"));
   const items = list.map(r => ({ text: r.text, status: r.status, note: r.note || "", ...(r.status === "done" && c ? costOf(c, r) : {}) }));
-  const stale = !!c && (reqsFresh(m, c).some(t => isUser(t.user)) || needFix(m));
+  const stale = !!c && (reqsFresh(m, c).some(t => isUser(t.user)) || needFix(m) || needTopics(m));
   // topics carry the turn's time and its place in the page's turn list (i), so tapping one scrolls there
   const topics = (Array.isArray(m.topics) ? m.topics : []).map(t => { const k = t.startTurn - (c?.base || 0); return { title: t.title, i: k, ts: c?.turns[k]?.ts || null }; });
   return { items, has: Array.isArray(m.reqs), busy: reqsRun.has(id), stale, err: !CLAUDE ? "unavailable" : m.reqsErr || null,

@@ -106,6 +106,12 @@ function apply(m, d) {
   if (d.type === "ai-title") { m.title = d.aiTitle; return; }
   if (d.type === "last-prompt") { m.lastPrompt = d.lastPrompt; return; }
   if (d.isSidechain) return;
+  // a message typed while Claude was busy lands as a queued command; it is still something the user said
+  if (d.attachment && d.attachment.type === "queued_command" && d.attachment.prompt) {
+    const t = cleanUserText(String(d.attachment.prompt));
+    if (t) m.turns.push({ user: t, ts: d.timestamp ? Date.parse(d.timestamp) : null, steps: [], done: false });
+    return;
+  }
   const msg = d.message; if (!msg) return;
   const ts = d.timestamp ? Date.parse(d.timestamp) : null;
   if (d.type === "user" && !d.isMeta) {
@@ -136,9 +142,17 @@ function apply(m, d) {
       }
     }
     turn.end = ts;
-    // requests checklist: everything each reply cost (input + output + cache), per model; a reply's blocks repeat its id
-    if (msg.id && msg.usage) { const u = msg.usage;
-      (turn.useBy || (turn.useBy = {}))[msg.id] = { m: msg.model || "", t: (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) }; }
+    // real token count from the API's own usage numbers: each reply in a turn counts once (its blocks repeat
+    // the same message id, the last one carries the final figure), summed across every step of the turn
+    if (msg.id && msg.usage && typeof msg.usage.output_tokens === "number") {
+      const by = turn.tokBy || (turn.tokBy = {});
+      by[msg.id] = Math.max(by[msg.id] || 0, msg.usage.output_tokens);
+      turn.tok = Object.values(by).reduce((a, b) => a + b, 0);
+      // requests checklist: the new work each reply cost, per model, for "~84k tok · Opus". Cache re-reads of the
+      // same history are left out: they run to millions, cost a tenth as much, and hid which jobs were really big.
+      const u = msg.usage, all = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      (turn.useBy || (turn.useBy = {}))[msg.id] = { m: msg.model || "", t: all };
+    }
   }
 }
 function readFileModel(p) {
@@ -168,7 +182,7 @@ function shapeTurns(model, liveTurnOpen) {
       if (idx >= 0) { answer = t.steps[idx].text; work = t.steps.filter((_, j) => j !== idx); }
     }
     const secs = t.end && t.ts ? Math.max(0, Math.round((t.end - t.ts) / 1000)) : null;
-    return { i, user: t.user, answer, work, open, secs };
+    return { i, user: t.user, answer, work, open, secs, tok: t.tok || 0 };
   });
 }
 const KEEP_TURNS = 40;
@@ -234,16 +248,17 @@ function findTranscript(sessionId) {
 
 function startProc(s) {
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-    "--include-hook-events", "--permission-prompt-tool", "stdio", "--permission-mode", s.mode || "default"];
+    "--include-hook-events", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", s.mode || "default"];
   if (s.sessionId) args.push("--resume", s.sessionId);
   const env = { ...process.env, CLAUDE_SESSION_LABEL: s.label };
   if (!WIN) env.PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
   const child = spawn(CLAUDE, args, { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, shell: WIN && /\.cmd$/i.test(CLAUDE) });
-  const p = { child, busy: false, perm: null, unread: false, err: null, lastLine: "" };
+  const p = { child, busy: false, perm: null, unread: false, err: null, lastLine: "", born: Date.now() };
   procs.set(s.id, p);
   let buf = "";
   child.stdout.on("data", chunk => {
     buf += chunk; const lines = buf.split("\n"); buf = lines.pop();
+    p.lastEv = Date.now();
     for (const l of lines) { if (!l.trim()) continue; let d; try { d = JSON.parse(l); } catch { continue; } onEvent(s, p, d); }
   });
   child.stderr.on("data", c => { p.lastLine = String(c).trim().slice(-300); });
@@ -259,6 +274,17 @@ function startProc(s) {
 const deadErr = new Map();
 
 function onEvent(s, p, d) {
+  // live token count for the "Working…" line: the API's real output_tokens for every finished reply this turn,
+  // plus the reply streaming right now (its text/thinking so far, ~4 characters a token) until its real number lands
+  if (d.type === "stream_event") {
+    const e = d.event || {};
+    if (e.type === "message_start") p.curChars = 0;
+    else if (e.type === "content_block_delta") { const x = e.delta || {}; p.curChars = (p.curChars || 0) + String(x.text || x.thinking || x.partial_json || "").length; }
+    else if (e.type === "message_delta" && e.usage && typeof e.usage.output_tokens === "number") { p.doneTok = (p.doneTok || 0) + e.usage.output_tokens; p.curChars = 0; }
+    const t = (p.doneTok || 0) + Math.round((p.curChars || 0) / 4);
+    if (t !== p.liveTok) { p.liveTok = t; broadcast(s.id); }
+    return;
+  }
   if (d.type === "system" && d.subtype === "init" && d.session_id && s.sessionId !== d.session_id) {
     s.sessionId = d.session_id; if (!s.spare) saveState();
   } else if (d.type === "control_request" && d.request?.subtype === "can_use_tool") {
@@ -298,17 +324,28 @@ setInterval(fillSpares, 60000);
 // ---------- local-model chats ("pipe" sessions) ----------
 // A "pipe" launcher runs a script that reads one line from stdin and prints "› " when it is ready
 // for the next one (a llama.cpp or MLX chat loop, for example). TERM=dumb asks it to skip colors and spinners.
+// Optional: the script can print invisible OSC codes the window never shows, and Moonstone reads them:
+//   ESC ] 7717 ; tok=N BEL          tokens generated so far this answer (the Working line's counter)
+//   ESC ] 7717 ; ctx=used/limit BEL how full its context is after an answer (the memory meter)
 const ANSI = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\r/g;
 function startPipe(s) {
-  const env = { ...process.env, PYTHONUNBUFFERED: "1", TERM: "dumb", CLAUDE_SESSION_LABEL: s.label };
+  const env = { ...process.env, PYTHONUNBUFFERED: "1", TERM: "dumb", CLAUDE_SESSION_LABEL: s.label, TQDM_DISABLE: "1" };   // no progress bars in the chat
   if (!WIN) env.PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
-  const child = spawn("/bin/bash", [s.cmd], { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+  // Windows has no bash: run the launcher line through the shell as written
+  const child = WIN ? spawn(s.cmd, { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: true, windowsHide: true })
+                    : spawn("/bin/bash", [s.cmd], { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
   const p = { child, busy: true, perm: null, unread: false, err: null, pipe: true, out: "" };
   procs.set(s.id, p);
   s.log = s.log || [];
   if (!s.log.length) s.log.push({ user: null, answer: "", ts: Date.now() }); // the loading banner
   const onOut = chunk => {
-    p.out += String(chunk).replace(ANSI, "");
+    const raw = String(chunk); let m;
+    const re = /\x1b\]7717;tok=(\d+)\x07/g; while ((m = re.exec(raw))) p.liveTok = +m[1];
+    const rc = /\x1b\]7717;ctx=(\d+)\/(\d+)\x07/g;
+    while ((m = rc.exec(raw))) { const used = +m[1], max = +m[2]; if (max) s.ctx = { used, max, pct: Math.min(100, Math.round(100 * used / max)) }; }
+    // model libraries draw progress bars ("Prefill: 36%|███▌ | 2048/5711 [00:24<00:43, 83.56tok/s]"); never show or
+    // narrate them. TQDM_DISABLE stops most at the source; this catches the rest.
+    p.out += raw.replace(ANSI, "").replace(/[^\n\r]*\d{1,3}%\|[^\n\r|]*\|[^\n\r]*\[[^\n\r\]]*\][\r]*/g, "").replace(/\r+(?!\n)/g, "");
     const turn = s.log[s.log.length - 1];
     const ready = /(^|\n)\s*›\s*$/.test(p.out);
     turn.answer = p.out.replace(/(^|\n)\s*›\s*$/, "").replace(/^\s+|\s+$/g, "").slice(-20000);
@@ -317,7 +354,7 @@ function startPipe(s) {
   };
   child.stdout.on("data", onOut); child.stderr.on("data", onOut);
   child.on("error", e => { p.err = "couldn't start: " + e.message; p.busy = false; deadErr.set(s.id, p.err); broadcast(); });
-  child.on("exit", code => { if (procs.get(s.id) === p) procs.delete(s.id); if (p.busy) deadErr.set(s.id, `stopped (exit ${code})`); saveState(); broadcast(); });
+  child.on("exit", code => { if (procs.get(s.id) === p) procs.delete(s.id); if (p.busy && !p.ended) deadErr.set(s.id, `stopped (exit ${code})`); saveState(); broadcast(); });
   return p;
 }
 function sendPipe(s, text) {
@@ -326,7 +363,7 @@ function sendPipe(s, text) {
   deadErr.delete(s.id);
   s.log.push({ user: text, answer: "", ts: Date.now() });
   if (s.log.length > 60) { s.logBase = (s.logBase || 0) + s.log.length - 60; s.log = s.log.slice(-60); }   // keeps request turn numbers steady
-  p.busy = true; p.unread = false; p.out = "";
+  p.busy = true; p.unread = false; p.out = ""; p.liveTok = 0;
   p.child.stdin.write(text.replace(/\n/g, " ") + "\n");
   saveState(); broadcast(s.id);
 }
@@ -335,6 +372,8 @@ function killTree(p, sig = "SIGTERM") { try { process.kill(-p.child.pid, sig); }
 setInterval(() => {
   for (const s of state.sessions) {
     const p = procs.get(s.id); if (!p?.pipe || p.busy) continue;
+    // a pipe launcher in group "cloud" talks to a hosted model and holds no memory here: closing it frees nothing
+    const lc = (CONFIG.launchers || []).find(l => l.label === s.label); if (lc && lc.group === "cloud") continue;
     const last = s.log?.[s.log.length - 1]; const at = last?.end || last?.ts || 0;
     if (Date.now() - at > 30 * 60e3) { killTree(p); s.log.push({ user: null, answer: "(closed after 30 idle minutes to free its memory; send a message to start it again)", ts: Date.now(), end: Date.now() }); saveState(); }
   }
@@ -389,13 +428,16 @@ async function sendApi(s, text) {
           const j = JSON.parse(d), x = j.choices?.[0]?.delta || {};
           // thinking arrives as reasoning_content: count it so the token meter moves while nothing is shown yet
           if (x.content || x.reasoning_content || x.reasoning) p.liveTok = (p.liveTok || 0) + 1;
-          if (j.usage?.completion_tokens) p.liveTok = j.usage.completion_tokens;
+          if (j.usage?.completion_tokens) p.liveTok = j.usage.completion_tokens + (j.usage.completion_tokens_details?.reasoning_tokens || 0);
+          // memory meter for model-server chats: the server's own prompt + answer count against its window
+          // (launcher "ctxLimit", default 128K)
+          if (j.usage?.total_tokens || j.usage?.prompt_tokens) { const used = j.usage.total_tokens || (j.usage.prompt_tokens + (j.usage.completion_tokens || 0)), max = l.ctxLimit || 131072; s.ctx = { used, max, pct: Math.min(100, Math.round(100 * used / max)) }; }
           turn.answer += x.content || "";
         } catch {}
       }
       if (Date.now() - last > 300) { last = Date.now(); broadcast(s.id); }
     });
-    res.on("end", () => { if (turn.end) return; turn.answer = turn.answer.replace(/^\s+/, "") || "(no answer)"; turn.tok = p.liveTok || 0; turn.model = l.model || l.label; turn.end = Date.now(); p.busy = false; p.req = null; p.unread = true; if (sv) sv.lastUsed = Date.now(); saveState(); broadcast(s.id); });
+    res.on("end", () => { if (turn.end) return; turn.answer = turn.answer.replace(/^\s+/, "") || "(no answer)"; turn.tok = p.liveTok || 0; turn.model = l.model || l.label; turn.end = Date.now(); p.busy = false; p.req = null; p.unread = true; if (sv) sv.lastUsed = Date.now(); saveState(); broadcast(s.id); reqsSoon(s.id); });
   });
   p.req = req; p.stop = () => { req.destroy(); fail((turn.answer ? turn.answer + "\n\n" : "") + "(stopped)"); deadErr.delete(s.id); };
   req.setTimeout(180e3, () => { req.destroy(); fail("The model went quiet for 3 minutes, so I stopped it."); });
@@ -417,7 +459,7 @@ function send(s, text) {
   let p = procs.get(s.id);
   if (!p || p.child.exitCode !== null) p = startProc(s);
   deadErr.delete(s.id);
-  p.busy = true; p.err = null; p.unread = false; p.pendingText = text;
+  p.busy = true; p.err = null; p.unread = false; p.pendingText = text; p.doneTok = 0; p.curChars = 0; p.liveTok = 0;
   sendLine(p, { type: "user", message: { role: "user", content: text } });
   broadcast(s.id);
 }
@@ -492,7 +534,9 @@ function listSessions() {
     const f = tp ? readFileModel(tp) : null;
     const m = f?.model;
     const ask = !p?.busy && !p?.perm ? askOf(lastAnswer(m)) : null;
-    const status = p?.perm ? "needs" : p?.busy ? "cooking" : (p?.err || deadErr.get(s.id)) ? "error" : ask ? "yourturn" : p?.unread ? "answered" : "idle";
+    // "cooking" only while the claude process is alive AND has said something in the last 30 minutes
+    const cooking = !!p?.busy && p.child?.exitCode === null && Date.now() - (p.lastEv || p.born || Date.now()) < 30 * 60e3;
+    const status = p?.perm ? "needs" : cooking ? "cooking" : (p?.err || deadErr.get(s.id)) ? "error" : ask ? "yourturn" : p?.unread ? "answered" : "idle";
     out.push({ id: s.id, kind: "dock", label: s.label, color: s.color, title: m?.title || null, subject: subjectFor(s.id),
       status, ask, last: lastLine(m), updated: f?.mtime || s.created, running: !!p });
   }
@@ -504,8 +548,11 @@ function listSessions() {
     const tp = findTranscript(live.sessionId); if (!tp) continue;
     const f = readFileModel(tp); const m = f.model;
     const lab = labelFor(m.cwd || live.cwd);
+    // terminal sessions get an ask too, so the YOUR TURN card + answer buttons show up for them as well
+    const tBusy = live.status === "busy" || (!live.status && now - f.mtime < LIVE_MS);
+    const tAsk = tBusy ? null : askOf(lastAnswer(m));
     out.push({ id: "t:" + live.sessionId, kind: "terminal", label: lab.label, color: lab.color, title: m.title, subject: subjectFor("t:" + live.sessionId),
-      status: live.status === "busy" || (!live.status && now - f.mtime < LIVE_MS) ? "cooking" : "idle", last: lastLine(m), updated: f.mtime, live: true });
+      status: tBusy ? "cooking" : tAsk ? "yourturn" : "idle", ask: tAsk, last: lastLine(m), updated: f.mtime, live: true });
   }
   out.sort((a, b) => rank(a) - rank(b) || b.updated - a.updated);
   return out;
@@ -551,7 +598,7 @@ function fullTurns(id) {
   }
   const s = state.sessions.find(x => x.id === id); if (!s) return null;
   const p = procs.get(id);
-  if (s.kind === "pipe" || s.kind === "api") return (s.log || []).map((t, i, a) => ({ i, user: t.user, answer: t.answer || null, work: [], open: !!p?.busy && i === a.length - 1, secs: t.end ? Math.round((t.end - t.ts) / 1000) : null }));
+  if (s.kind === "pipe" || s.kind === "api") return (s.log || []).map((t, i, a) => ({ i, user: t.user, answer: t.answer || null, work: [], open: !!p?.busy && i === a.length - 1, secs: t.end ? Math.round((t.end - t.ts) / 1000) : null, tok: t.tok || 0 }));
   const tp = findTranscript(s.sessionId); const f = tp ? readFileModel(tp) : null;
   const turns = f ? shapeTurns(f.model, !!p?.busy) : [];
   if (p?.busy && (!turns.length || !turns[turns.length - 1].open)) turns.push({ i: turns.length, user: p.pendingText || null, answer: null, work: [], open: true });
@@ -819,8 +866,12 @@ function readJobs() {
   const now = Date.now() / 1000, out = [];
   for (const f of names) {
     let j; try { j = JSON.parse(fs.readFileSync(path.join(JOB_DIR, f), "utf8")); } catch { continue; }
-    if (j.pid && !alive(j.pid)) continue;
-    if (now - (j.updated || now) > 6 * 3600) continue;
+    // a job whose process is gone, or that stopped reporting, is not working: drop the card AND the file,
+    // so nothing pulses for work that already died
+    const quiet = now - (j.updated || j.start || now);
+    const dead = (j.pid && !alive(j.pid)) || quiet > 6 * 3600
+      || (!j.pid && quiet > 30 * 60 && (!j.eta_end || now > j.eta_end + 30 * 60));
+    if (dead) { try { fs.unlinkSync(path.join(JOB_DIR, f)); } catch {} continue; }
     out.push({ id: f.slice(0, -5), label: j.label, start: j.start, total: j.total || null, done: j.done || 0, eta_end: j.eta_end || null });
   }
   return out.sort((a, b) => (a.start || 0) - (b.start || 0));
@@ -869,7 +920,7 @@ function bgScanFile(tp) {
           if (c.type !== "tool_use") continue;
           const inp = c.input || {};
           if (c.name === "Agent" && inp.run_in_background !== false)
-            e.tasks.set(c.id, { id: c.id, kind: "agent", label: inp.description || "Background agent", startMs: ts, open: true });
+            e.tasks.set(c.id, { id: c.id, kind: "agent", label: inp.description || "Background agent", startMs: ts, open: true, model: modelFam(inp.model) });
           else if (c.name === "Bash" && inp.run_in_background)
             e.tasks.set(c.id, { id: c.id, kind: "bash", label: inp.description || "Background command", startMs: ts, open: true });
           else if (c.name === "Monitor")
@@ -885,7 +936,7 @@ function bgScanFile(tp) {
           if (stopped) for (const x of e.tasks.values()) if (x.bgId === stopped || x.agentId === stopped) x.open = false;
           const t = e.tasks.get(c.tool_use_id); if (!t) continue;
           const txt = textOf(c.content);
-          const bid = /running in background with ID: (\w+)/.exec(txt); if (bid) t.bgId = bid[1];
+          const bid = /running in background with ID: (\w+)/.exec(txt) || /Monitor started \(task (\w+)/.exec(txt); if (bid) t.bgId = bid[1];
           const of = /Output is being written to: (\S+?)\.?(?:\s|$)/.exec(txt) || /output_file: (\S+)/.exec(txt);
           if (t.pending) { delete t.pending; if (/moved to the background/.test(txt.slice(0, 300))) t.open = true; else { e.tasks.delete(c.tool_use_id); continue; } }
           if (of) t.outFile = of[1];
@@ -896,8 +947,11 @@ function bgScanFile(tp) {
       const raw = j.type === "user" ? textOf(content) : (j.type === "queue-operation" ? j.content || "" : "");
       if (raw.includes("<task-notification>")) {
         const id = /<tool-use-id>([^<]+)</.exec(raw)?.[1], status = /<status>([^<]+)</.exec(raw)?.[1];
-        const t = id && e.tasks.get(id);
-        if (t && t.open && /completed|failed|killed|stopped|cancel|timeout/i.test(status || "")) { t.open = false; if (/completed/i.test(status)) bgRecord(t, ts); }
+        // a Monitor that times out says so with only its task id, no tool-use id and no status, so match those by task id
+        const tid = /<task-id>([^<]+)</.exec(raw)?.[1];
+        const t = (id && e.tasks.get(id)) || (tid && [...e.tasks.values()].find(x => x.bgId === tid));
+        const ended = /completed|failed|killed|stopped|cancel|timeout/i.test(status || "") || /Monitor expired|stream ended/i.test(raw);
+        if (t && t.open && ended) { t.open = false; if (/completed/i.test(status || "")) bgRecord(t, ts); }
       }
     }
     for (const [k, t] of e.tasks) if (!t.open && !t.pending) e.tasks.delete(k);
@@ -908,9 +962,21 @@ function tailLines(file, bytes = 16384) {
   try { const st = fs.statSync(file); const n = Math.min(bytes, st.size); const fd = fs.openSync(file, "r"); const b = Buffer.alloc(n);
     fs.readSync(fd, b, 0, n, st.size - n); fs.closeSync(fd); return { text: b.toString("utf8"), mtime: st.mtimeMs }; } catch { return null; }
 }
+function agentModel(sub) {   // the model the subagent's own replies were written by
+  const t = tailLines(sub, 65536); if (!t) return null;
+  for (const l of t.text.split("\n").reverse()) {
+    if (!l.includes('"model"')) continue;
+    let j; try { j = JSON.parse(l); } catch { continue; }
+    const f = j.type === "assistant" ? modelFam(j.message?.model) : null; if (f) return f;
+  }
+  return null;
+}
 function agentStep(sub) {
   const t = tailLines(sub, 65536); if (!t) return null;
   const lines = t.text.split("\n").reverse();
+  // an agent stopped by the usage limit ends on that error and never writes again
+  const lastReal = lines.find(l => l.trim());
+  if (lastReal && /hit your (session|usage) limit|usage limit reached|"error":\s*"rate_limit|out of (usage|credits)/i.test(lastReal.slice(0, 4000))) return { line: "Stopped", at: t.mtime, limit: true };
   for (const l of lines) {
     let j; try { j = JSON.parse(l); } catch { continue; }
     const c = j.message?.content; if (j.type !== "assistant" || !Array.isArray(c)) continue;
@@ -944,23 +1010,67 @@ function ctxOf(tp) {
       const used = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
       if (!used) continue;
       const model = String(j.message.model || ""), max = /haiku/i.test(model) ? 200000 : 1000000;
-      return { used, max, pct: Math.min(100, Math.round(100 * used / max)) };
+      return { used, max, pct: Math.min(100, Math.round(100 * used / max)), model: modelFam(model) };
     }
   } catch {}
+  return null;
+}
+// ---------- is that background work provably alive? ----------
+// A background agent cut off by a usage limit, or one whose chat was restarted or closed, never sends its finish
+// note, so its card used to pulse forever. A card now only shows while ALL of these hold:
+//   1. a Claude process that owns the chat is running right now (~/.claude/sessions/<pid>.json, or the dock's child)
+//   2. that process was already running when the work started (a restart / resume kills in-process agents)
+//   3. an agent wrote to its own transcript in the last 20 minutes, and its last words were not a usage-limit stop
+//   4. it is younger than a hard cap (agents 4h, commands and watches 6h)
+const BG_STALE_AGENT_MS = 20 * 60e3, BG_MAX_AGE = { agent: 4 * 3600e3, bash: 6 * 3600e3, monitor: 6 * 3600e3 };
+let ownersAt = 0, ownersMap = new Map();
+function chatOwners() {   // sessionId -> {pid, startedAt} for every live Claude process on this machine, any entrypoint
+  if (Date.now() - ownersAt < 3000) return ownersMap;
+  const m = new Map(), dir = path.join(HOME, ".claude", "sessions");
+  let names = []; try { names = fs.readdirSync(dir).filter(n => /^\d+\.json$/.test(n)); } catch {}
+  for (const n of names) {
+    let j; try { j = JSON.parse(fs.readFileSync(path.join(dir, n), "utf8")); } catch { continue; }
+    if (!j.sessionId || !j.pid || !alive(j.pid)) continue;
+    const st = +j.startedAt || 0, prev = m.get(j.sessionId);
+    if (!prev || st > prev.startedAt) m.set(j.sessionId, { pid: j.pid, startedAt: st });
+  }
+  for (const [id, p] of procs) {   // Moonstone's own claude children count too, whatever their CLI writes
+    const s = state.sessions.find(x => x.id === id);
+    if (s?.sessionId && p.child && p.child.exitCode === null && !p.pipe && !m.has(s.sessionId)) m.set(s.sessionId, { pid: p.child.pid, startedAt: p.born || 0 });
+  }
+  ownersAt = Date.now(); ownersMap = m; return m;
+}
+function bgDead(t, tp, step) {
+  const now = Date.now();
+  if (now - t.startMs > (BG_MAX_AGE[t.kind] || 6 * 3600e3)) return "too old";
+  const owner = chatOwners().get(path.basename(tp, ".jsonl"));
+  if (!owner) {   // nothing owns the chat: give a just-written transcript 2 minutes (a process mid-restart)
+    let mt = 0; try { mt = fs.statSync(tp).mtimeMs; } catch {}
+    if (now - mt > 2 * 60e3) return "chat closed";
+  } else if (owner.startedAt && t.startMs < owner.startedAt - 5000) return "chat restarted";
+  if (t.kind === "agent") {
+    const at = step?.at || t.startMs;
+    if (now - at > BG_STALE_AGENT_MS) return "agent silent";
+    if (step?.limit) return "agent hit a limit";
+  }
   return null;
 }
 
 function bgTasks(tp) {
   if (!tp) return [];
   const e = bgScanFile(tp); if (!e) return [];
-  const subDir = tp.replace(/\.jsonl$/, ""), out = [];
+  const subDir = tp.replace(/\.jsonl$/, ""), out = []; let parentModel;
   for (const t of e.tasks.values()) {
     if (!t.open) continue;
     let step = null;
     if (t.kind === "agent" && t.agentId) step = agentStep(path.join(subDir, "subagents", `agent-${t.agentId}.jsonl`));
     else if (t.outFile) step = outStep(t.outFile);
+    // a dead card is closed for good, not just hidden this once (see bgDead)
+    if (bgDead(t, tp, step)) { t.open = false; continue; }
     const eta = bgEtaSecs(t);
-    out.push({ id: t.id, kind: t.kind, label: t.label, start: t.startMs / 1000, eta_end: t.startMs / 1000 + eta, total: null, done: 0,
+    let model = null;
+    if (t.kind === "agent") model = (t.agentId && agentModel(path.join(subDir, "subagents", `agent-${t.agentId}.jsonl`))) || t.model || (parentModel ??= ctxOf(tp)?.model || null);
+    out.push({ id: t.id, kind: t.kind, model, label: t.label, start: t.startMs / 1000, eta_end: t.startMs / 1000 + eta, total: null, done: 0,
       step: step?.line || null, stepAt: step?.at ? step.at / 1000 : null });
   }
   return out.sort((a, b) => a.start - b.start);
@@ -973,9 +1083,12 @@ function sessionDetail(id) {
   if (id.startsWith("t:")) {
     const sid = id.slice(2); const tp = findTranscript(sid); if (!tp) return null;
     const f = readFileModel(tp); const lab = labelFor(f.model.cwd);
-    const live = liveTerminalSessions().some(x => x.sessionId === sid);
+    const lv = liveTerminalSessions().find(x => x.sessionId === sid);
+    const live = !!lv;
+    const busy = lv ? lv.status === "busy" : Date.now() - f.mtime < LIVE_MS;
     return { id, kind: "terminal", label: lab.label, color: lab.color, title: f.model.title, cwd: f.model.cwd, subject: subjectFor(id), reqs: reqsView(id),
-      live, turns: lean(fullTurns(id)), jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) };
+      live, busy, turns: lean(fullTurns(id)), jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp),
+      ask: busy ? null : askOf(lastAnswer(f.model)) };
   }
   const s = state.sessions.find(x => x.id === id); if (!s || s.hidden) return null;   // ended = gone from every window
   const p = procs.get(id);
@@ -983,8 +1096,8 @@ function sessionDetail(id) {
   const tp = s.kind === "pipe" || s.kind === "api" ? null : findTranscript(s.sessionId); const f = tp ? readFileModel(tp) : null;
   const turns = lean(fullTurns(id));
   return { id, kind: "dock", local: s.kind === "pipe" || s.kind === "api", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd, subject: subjectFor(id), reqs: reqsView(id),
-    busy: !!p?.busy, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
-    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp),
+    busy: !!p?.busy, liveTok: p?.busy ? p.liveTok || 0 : null, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
+    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) || s.ctx || null,
     ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null };
 }
 

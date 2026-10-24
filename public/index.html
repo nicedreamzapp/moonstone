@@ -273,6 +273,21 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 @keyframes micbreathe{to{opacity:.6}}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* background work folds into one small "● 2 working" pill; tap it for the full cards */
+.jobwrap{margin:0}
+.jobwrap>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;align-self:flex-end;margin-left:auto;padding:3px 10px;border-radius:999px;font-size:11px;color:#ffd08acc;background:rgba(20,16,8,.35);border:1px solid rgba(255,170,40,.25);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:.75}
+.jobwrap>summary::-webkit-details-marker{display:none}
+.jobwrap>summary .dot{width:7px;height:7px;border-radius:50%;background:#ffaa28;animation:jobpulse 1.4s ease-out infinite}
+.jobwrap[open]>summary{opacity:1}
+.jobwrap>.jobcards{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.jobs{pointer-events:none}.jobs>*{pointer-events:auto}
+/* model badge on background agents: which model is doing the work */
+.mdl{display:inline-block;margin-right:6px;padding:0 7px;border-radius:999px;font-size:10px;line-height:15px;letter-spacing:.03em;white-space:nowrap;vertical-align:1px;color:var(--mc);background:color-mix(in srgb,var(--mc) 14%,transparent);border:1px solid color-mix(in srgb,var(--mc) 35%,transparent)}
+.mdl.opus{--mc:#c9a6ff}.mdl.sonnet{--mc:#7fc4ff}.mdl.haiku{--mc:#7fe0b0}.mdl.fable{--mc:#ffb38a}
+/* live token count and seconds on the Working line, token count under each answer */
+.live .secs{flex-shrink:0;font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint)}
+.live .tok{flex-shrink:0;font-variant-numeric:tabular-nums;font-size:11px;padding:1px 7px;border-radius:9px;background:color-mix(in srgb,var(--c) 22%,transparent);color:color-mix(in srgb,var(--c) 55%,white)}
+.atok{margin-top:4px;font-size:10.5px;color:var(--faint,#778);font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -431,15 +446,23 @@ function ctxHtml(d){
   const cls = x.pct >= 80 ? " hot" : x.pct >= 60 ? " warm" : "";
   return `<div class="ctxm${cls}" title="How full this chat's memory is. Near 100% it gets summarized and older detail is lost."><span class="bar"><i style="width:${Math.max(2,x.pct)}%"></i></span>memory ${x.pct}% · ${k(x.used)} of ${k(x.max)}</div>`;
 }
+function mdlPill(m){ return m ? `<span class="mdl ${esc(m)}" title="Model: ${esc(m)}">${esc(m[0].toUpperCase()+m.slice(1))}</span>` : ""; }
 function jobsHtml(d){
   const js = d.jobs || [], ctx = ctxHtml(d); if(!js.length && !ctx) return "";
-  return `<div class="jobs">${ctx}${js.map(j=>{ const pct = j.total ? Math.min(100, Math.round(100*j.done/j.total)) : null;
+  const cards = js.map(j=>{ const pct = j.total ? Math.min(100, Math.round(100*j.done/j.total)) : null;
     const kind = j.kind==="agent" ? "agent" : j.kind==="monitor" ? "watch" : j.kind==="bash" ? "task" : "job";
     if(pct===null && j.eta_end && j.start) j._pct = 1;
-    return `<div class="job" data-job='${esc(JSON.stringify(j))}'><span class="ring"></span><div class="jl"><span class="kind">${kind}</span>${esc(j.label)}</div>
+    return `<div class="job" data-job='${esc(JSON.stringify(j))}'><span class="ring"></span><div class="jl"><span class="kind">${kind}</span>${mdlPill(j.model)}${esc(j.label)}</div>
       <div class="jm"><span class="bar${pct===null&&!j.eta_end?" ind":""}"><i style="${pct!==null?`width:${pct}%`:j.eta_end?`width:${jobTimePct(j)}%`:""}"></i></span>${j.total?`<span>${j.done}/${j.total}</span>`:""}<span class="jeta">${esc(jobEta(j))}</span></div>
-      ${j.step?`<div class="js"><span class="jst">${esc(j.step)}</span><span class="ago">${esc(jobAgo(j))}</span></div>`:""}</div>`; }).join("")}</div>`;
+      ${j.step?`<div class="js"><span class="jst">${esc(j.step)}</span><span class="ago">${esc(jobAgo(j))}</span></div>`:""}</div>`; }).join("");
+  // one small pill ("● 4 working"); tap it for the full cards, so they never cover the chat on a phone
+  const pill = js.length ? `<details class="jobwrap"${window.__jobsOpen?" open":""}><summary><span class="dot"></span>${js.length} working</summary><div class="jobcards">${cards}</div></details>` : "";
+  return `<div class="jobs">${pill}${ctx}</div>`;
 }
+document.addEventListener("toggle", e => { if(e.target.classList && e.target.classList.contains("jobwrap")) window.__jobsOpen = e.target.open; }, true);
+// the Working line ticks seconds too (a model that thinks silently only reports its tokens at the end)
+const openSince = {};
+setInterval(()=>{ for(const e of document.querySelectorAll(".live .secs")) e.textContent = Math.round((Date.now()-e.dataset.since)/1000)+"s"; }, 1000);
 function jobTimePct(j){ const now = Date.now()/1000; return Math.max(3, Math.min(97, Math.round(100*(now-j.start)/Math.max(1, j.eta_end-j.start)))); }
 function jobAgo(j){ if(!j.stepAt) return ""; const s = Math.max(0, Math.round(Date.now()/1000 - j.stepAt)); return s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.floor(s/60)}m ago`; }
 // every second: tick the ETA, the "Xs ago", and the time-based bar in place (no repaint, so typing/dictation is untouched)
@@ -531,9 +554,9 @@ function renderConvo(keepScroll){
       // show what it has written so far (Claude's lines between tools, a local model's streaming text);
       // the finished answer replaces it when the turn closes
       const sofar = (t.work||[]).filter(w=>w.k==="text"&&w.text.trim()).map(w=>w.text).concat(t.answer?[t.answer]:[]);
-      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
+      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…${(()=>{ const est = d.local && !(d.liveTok || t.tok); const n = est ? Math.round(sofar.join("").length/4) : (d.liveTok ?? t.tok ?? 0); const k = openId+":"+i; openSince[k] ??= Date.now(); return `<span class="tok">${est?"~":""}${n.toLocaleString()} tokens</span><span class="secs" data-since="${openSince[k]}">${Math.round((Date.now()-openSince[k])/1000)}s</span>`; })()}<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
     } else if(t.answer || t.hasWork || t.work?.length){
-      h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}</div>`;
+      h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}${t.tok?`<div class="atok">${t.tok.toLocaleString()} tokens</div>`:""}</div>`;
     }
     return `<div class="ti" data-ti="${t.i}" style="display:contents">${h}</div>`;   // topics scroll to their turn
   }).concat(pend.map(x=>`<div class="u">${esc(x.text)}</div>`));

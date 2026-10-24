@@ -228,8 +228,8 @@ let state = { sessions: [] };
 try { state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch {}
 // what each chat keeps across restarts
 const SAVE_KEYS = ["id", "sessionId", "cwd", "label", "mode", "color", "created", "hidden", "kind", "cmd", "log", "launcher", "ctx",
-  "subject", "subjectBy", "reqs", "reqsAt", "reqsVer", "reviewAt", "topics", "logBase"];
-const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(s => Object.fromEntries(SAVE_KEYS.map(k => [k, s[k]]))), tmeta: state.tmeta || {} }, null, 2));
+  "subject", "subjectBy", "reqs", "reqsAt", "reqsVer", "reviewAt", "topics", "logBase", "doneAt", "reopenAt"];
+const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(s => Object.fromEntries(SAVE_KEYS.map(k => [k, s[k]]))), tmeta: state.tmeta || {}, donePurgeAt: state.donePurgeAt || 0 }, null, 2));
 const procs = new Map(); // dock id -> {child, busy, perm, unread, err}
 
 const tpCache = new Map();
@@ -536,7 +536,7 @@ function listSessions() {
       const status = p?.busy ? "cooking" : deadErr.get(s.id) ? "error" : p?.unread ? "answered" : "idle";
       const lt = [...(s.log || [])].reverse().find(t => t.answer || t.user);
       out.push({ id: s.id, kind: "dock", local: true, label: s.label, color: s.color, title: s.kind === "api" ? null : p ? null : "not running", subject: subjectFor(s.id),
-        status, last: lt ? (lt.answer || "you: " + lt.user).replace(/\s+/g, " ").slice(0, 140) : "", updated: lt?.end || lt?.ts || s.created, running: !!p });
+        status, close: !p?.busy && lt?.answer ? closeOf(lt.answer) : null, last: lt ? (lt.answer || "you: " + lt.user).replace(/\s+/g, " ").slice(0, 140) : "", updated: lt?.end || lt?.ts || s.created, running: !!p });
       continue;
     }
     const tp = findTranscript(s.sessionId);
@@ -547,7 +547,7 @@ function listSessions() {
     const cooking = !!p?.busy && p.child?.exitCode === null && Date.now() - (p.lastEv || p.born || Date.now()) < 30 * 60e3;
     const status = p?.perm ? "needs" : cooking ? "cooking" : (p?.err || deadErr.get(s.id)) ? "error" : ask ? "yourturn" : p?.unread ? "answered" : "idle";
     out.push({ id: s.id, kind: "dock", label: s.label, color: s.color, title: m?.title || null, subject: subjectFor(s.id),
-      status, ask, last: lastLine(m), updated: f?.mtime || s.created, running: !!p });
+      status, ask, close: !p?.busy && !p?.perm ? closeOf(lastAnswer(m)) : null, last: lastLine(m), updated: f?.mtime || s.created, running: !!p });
   }
   // Terminal sessions: only ones whose Claude process is actually running right now.
   // Claude Code writes ~/.claude/sessions/<pid>.json for every live session.
@@ -556,13 +556,23 @@ function listSessions() {
     if (owned.has(live.sessionId) || dockPids().has(live.pid)) continue;
     const tp = findTranscript(live.sessionId); if (!tp) continue;
     const f = readFileModel(tp); const m = f.model;
+    const tm = state.tmeta?.[live.sessionId]; if (tm?.cleared && f.mtime <= tm.cleared) continue;   // purged from the Done list, nothing new since
     const lab = labelFor(m.cwd || live.cwd);
     // terminal sessions get an ask too, so the YOUR TURN card + answer buttons show up for them as well
     const tBusy = live.status === "busy" || (!live.status && now - f.mtime < LIVE_MS);
     const tAsk = tBusy ? null : askOf(lastAnswer(m));
     out.push({ id: "t:" + live.sessionId, kind: "terminal", label: lab.label, color: lab.color, title: m.title, subject: subjectFor("t:" + live.sessionId),
-      status: tBusy ? "cooking" : tAsk ? "yourturn" : "idle", ask: tAsk, last: lastLine(m), updated: f.mtime, live: true });
+      status: tBusy ? "cooking" : tAsk ? "yourturn" : "idle", ask: tAsk, close: tBusy ? null : closeOf(lastAnswer(m)), last: lastLine(m), updated: f.mtime, live: true });
   }
+  // Done list: a closed chat rides along flagged with doneAt (the page files it under Done). Anything new in it,
+  // or any status other than plain idle, brings it straight back to the live list.
+  let dch = false;
+  for (const x of out) {
+    const dm = doneMeta(x.id); if (!dm?.doneAt) continue;
+    if (x.updated > dm.doneAt || x.status !== "idle") { delete dm.doneAt; dm.reopenAt = Date.now(); dch = true; }
+    else x.doneAt = dm.doneAt;
+  }
+  if (dch) saveState();
   out.sort((a, b) => rank(a) - rank(b) || b.updated - a.updated);
   return out;
 }
@@ -586,6 +596,22 @@ function askOf(text) {
     return q.length > 240 ? "…" + q.slice(-240) : q;
   }
   return null;
+}
+// "Safe to close": a chat whose latest answer ends with a line "CLOSE: safe" says every request made in it is done
+// and nothing is running or pending; "CLOSE: not yet - <why>" says what is still open. Ask for that line in your
+// CLAUDE.md if you want the pill. Returns null when the latest answer has no CLOSE line. A message that still asks
+// the user something is never safe.
+function closeOf(text) {
+  if (!text) return null;
+  let hit = null;
+  for (const line of text.split("\n")) {
+    const mm = /^\s*(?:[-*>]\s*)?[*_`]*CLOSE[*_`]*\s*:\s*[*_`]*\s*(.*)$/i.exec(line);
+    if (mm) hit = mm[1].replace(/[*_`]+\s*$/, "").trim();
+  }
+  if (hit === null) return null;
+  if (/^safe\b/i.test(hit) && !askOf(text)) return { safe: true };
+  const why = hit.replace(/^safe\b/i, "").replace(/^not\s*yet\b/i, "").replace(/^[\s\-–—:,;(]+/, "").replace(/[)\s]+$/, "").trim();
+  return { safe: false, why: why.slice(0, 80) || (askOf(text) ? "question for you" : "") };
 }
 function lastLine(m) {
   if (!m) return "";
@@ -908,6 +934,63 @@ function reqsView(id) {
   return { items, has: Array.isArray(m.reqs), busy: reqsRun.has(id), stale, err: !CLAUDE ? "unavailable" : m.reqsErr || null,
     topics, renamed: m.subjectBy === "user" ? m.subject : null };
 }
+// ---------- Done list: chat auto-cleanup ----------
+// With several chats open the list clogs. A chat whose Requests pill reads all done (3/3) and that has sat idle for an
+// hour is closed into a per-machine "Done" list you can reopen with its history intact. Never closed: a chat that is
+// working, waiting on you (a question, a permission, an unread answer), has open or unread requests, background work
+// still running, or chat mail waiting. Every Sunday 03:00 the Done list drops chats closed more than 7 days ago (dock
+// chats end, terminal chats stop being listed until something new happens; transcripts stay on disk).
+// config "done": {"idleMinutes": 60, "keepDays": 7}, or false to turn the Done list off.
+const DONE_CFG = CONFIG.done === false ? null : (CONFIG.done || {});
+const DONE_IDLE_MS = (+DONE_CFG?.idleMinutes || 60) * 60e3, DONE_KEEP_MS = (+DONE_CFG?.keepDays || 7) * 86400e3, DONE_SWEEP_MS = 5 * 60e3;
+const doneMeta = id => String(id).startsWith("t:") ? state.tmeta?.[String(id).slice(2)] || null : state.sessions.find(x => x.id === id && !x.hidden) || null;
+function reqsAllDone(m) {   // the page's pill: done of what is still yours to finish (sent, replaced, cancelled and waiting don't count)
+  const list = Array.isArray(m?.reqs) ? m.reqs : [];
+  const counted = list.filter(r => !["sent", "superseded", "cancelled", "waiting"].includes(r.status));
+  return counted.length > 0 && counted.every(r => r.status === "done");
+}
+function doneReady(x, now) {   // x = one listSessions() entry
+  if (x.doneAt || x.status !== "idle" || x.ask) return false;
+  const m = doneMeta(x.id); if (!m || !reqsAllDone(m) || reqsRun.has(x.id)) return false;
+  const s = x.id.startsWith("t:") ? null : m;
+  if (s && (s.fallback || s.freshAsk || procs.get(s.id)?.busy || procs.get(s.id)?.perm)) return false;
+  const last = Math.max(x.updated || 0, m.reopenAt || 0, typingAt.get(x.id) || 0);
+  if (last > now - DONE_IDLE_MS) return false;
+  if (mail.inbox.some(k => k.to === x.id && k.state === "queued")) return false;
+  const c = chatTurns(x.id); if (!c || reqsFresh(m, c).some(t => isAsk(t.user))) return false;   // asked something the list hasn't read yet
+  const sid = s ? s.sessionId : x.id.slice(2);
+  if (sid && bgTasks(findTranscript(sid)).length) return false;
+  return true;
+}
+function lastSunday3(now) { const d = new Date(now); d.setHours(3, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); if (d.getTime() > now) d.setDate(d.getDate() - 7); return d.getTime(); }
+function donePurge(now) {
+  if ((state.donePurgeAt || 0) >= lastSunday3(now)) return false;
+  for (const s of state.sessions) {
+    if (!s.doneAt || now - s.doneAt < DONE_KEEP_MS) continue;
+    const p = procs.get(s.id); if (p) (p.pipe ? killTree(p) : p.child.kill("SIGTERM"));
+    s.hidden = true; delete s.doneAt;
+  }
+  for (const t of Object.values(state.tmeta || {})) if (t.doneAt && now - t.doneAt >= DONE_KEEP_MS) { t.cleared = now; delete t.doneAt; }
+  state.donePurgeAt = now; return true;
+}
+function doneSweep() {
+  const now = Date.now(); let changed = false;
+  try {
+    for (const x of listSessions()) {
+      if (!doneReady(x, now)) continue;
+      const m = doneMeta(x.id); if (!m) continue;
+      m.doneAt = now; changed = true;
+    }
+    if (donePurge(now)) changed = true;
+  } catch (e) { console.error("done sweep:", e.message); }
+  if (changed) { saveState(); broadcast(); }
+}
+function doneReopen(id) {
+  const m = id.startsWith("t:") ? (findTranscriptCached(id.slice(2)) ? metaOf(id) : null) : doneMeta(id);
+  if (!m) return false;
+  delete m.doneAt; delete m.cleared; m.reopenAt = Date.now(); saveState(); broadcast(); return true;
+}
+if (DONE_CFG && !process.env.DONE_NO_SWEEP) { setTimeout(doneSweep, 60e3); setInterval(doneSweep, DONE_SWEEP_MS); }
 // model family for the badge: "opus" | "sonnet" | "haiku" | "fable" | null, from an alias or a full model id
 function modelFam(m) { const x = /opus|sonnet|haiku|fable/i.exec(String(m || "")); return x ? x[0].toLowerCase() : null; }
 // ---------- background jobs (10/4) ----------
@@ -1142,7 +1225,7 @@ function sessionDetail(id) {
     const busy = lv ? lv.status === "busy" : Date.now() - f.mtime < LIVE_MS;
     return { id, kind: "terminal", label: lab.label, color: lab.color, title: f.model.title, cwd: f.model.cwd, subject: subjectFor(id), reqs: reqsView(id),
       live, busy, turns: lean(fullTurns(id)), jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp),
-      ask: busy ? null : askOf(lastAnswer(f.model)) };
+      ask: busy ? null : askOf(lastAnswer(f.model)), close: busy ? null : closeOf(lastAnswer(f.model)) };
   }
   const s = state.sessions.find(x => x.id === id); if (!s || s.hidden) return null;   // ended = gone from every window
   const p = procs.get(id);
@@ -1152,7 +1235,8 @@ function sessionDetail(id) {
   return { id, kind: "dock", local: s.kind === "pipe" || s.kind === "api", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd, subject: subjectFor(id), reqs: reqsView(id),
     busy: !!p?.busy, liveTok: p?.busy ? p.liveTok || 0 : null, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
     err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) || s.ctx || null,
-    ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null };
+    ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null,
+    close: !p?.busy && !p?.perm && f ? closeOf(lastAnswer(f.model)) : null };
 }
 
 // ---------- SSE ----------
@@ -1630,6 +1714,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, await buildState());
     if (req.method === "GET" && url.pathname === "/api/clients") return json(res, 200, { local: [...clients].filter(c => c.local).length });
     if (url.pathname.startsWith("/api/chat/")) return chatApi(req, res, url);
+    if (req.method === "GET" && url.pathname === "/api/chats/done") return json(res, 200, { machine: CONFIG.machine, done: listSessions().filter(x => x.doneAt).map(x => ({ ...x, machine: CONFIG.machine })) });
     // anything addressed to "<peer>~<id>" goes to that machine's dock
     const pid = parts[0] === "api" && parts[1] === "session" && parts[2] ? decodeURIComponent(parts[2]) : null;
     const peerOf = id => { const i = id ? id.indexOf("~") : -1; return i > 0 ? CONFIG.peers.find(p => p.id === id.slice(0, i)) : null; };
@@ -1757,6 +1842,11 @@ const server = http.createServer(async (req, res) => {
         let s = state.sessions.find(x => x.sessionId === sid);
         if (!s) { s = { id: crypto.randomUUID().slice(0, 8), sessionId: sid, cwd: f.model.cwd || HOME, label: lab.label, mode: l?.mode || "default", color: lab.color, created: Date.now(), ...tmetaCarry(sid) }; state.sessions.push(s); }
         s.hidden = false; saveState(); broadcast(); return json(res, 200, { id: s.id });
+      }
+      // the Done list's Reopen: back into the live list with everything it had, and a fresh hour before it can close again
+      if (parts[1] === "session" && parts[2] && parts[3] === "reopen") {
+        const id = decodeURIComponent(parts[2]);
+        return doneReopen(id) ? json(res, 200, { ok: true, id }) : json(res, 404, { error: "not found" });
       }
       // the user is typing in this chat (the page pings while the box has words in it): no chat-send wakes it meanwhile
       if (parts[1] === "session" && parts[2] && parts[3] === "typing") { typingAt.set(decodeURIComponent(parts[2]), Date.now()); return json(res, 200, { ok: true }); }

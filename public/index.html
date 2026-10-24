@@ -278,6 +278,23 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* background work folds into one small "● 2 working" pill; tap it for the full cards */
+/* "Safe to close": the chat's latest answer says CLOSE: safe (everything asked is done, nothing pending) */
+.sj-ok{margin-left:auto;flex:none;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;color:#b9f5d6;background:rgba(62,224,143,.13);border:1px solid rgba(62,224,143,.5);box-shadow:0 0 10px rgba(62,224,143,.22)}
+.sj-op{margin-left:auto;flex:0 1 auto;min-width:0;max-width:150px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:10.5px;color:rgba(255,171,61,.75)}
+.sj-ok~.sj-r,.sj-op~.sj-r{margin-left:0}
+@media (max-width:700px){.sj-op{max-width:90px}}
+.badge.safe{color:#b9f5d6;background:rgba(62,224,143,.12);border:1px solid rgba(62,224,143,.48);padding:3px 9px;font-weight:600}
+.rq-close{font-size:11.5px;padding:5px 6px 6px;color:rgba(255,171,61,.9);border-bottom:1px solid var(--rim2);margin-bottom:2px}
+.rq-close.ok{color:#b9f5d6}
+/* the Done list under each machine */
+.dn-pill{position:relative;z-index:1;align-self:flex-start;margin:6px 4px 0;padding:2px 10px;border-radius:999px;font-size:11px;color:var(--dim);border:1px solid var(--rim2);background:rgba(255,255,255,.03);cursor:pointer}
+.dn-pill b{color:var(--c);font-weight:600;margin-left:3px}
+.dn-pill.on{color:var(--fg);border-color:color-mix(in srgb,var(--c) 45%,transparent)}
+.dn-list{position:relative;z-index:1;display:flex;flex-direction:column;padding:2px 0 0}
+.dn-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;column-gap:8px;padding:5px 6px;font-size:12px;color:var(--dim);border-top:1px solid var(--rim2)}
+.dn-row span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.dn-row small{font-size:11px;white-space:nowrap}
+.dn-row button{padding:1px 9px;border-radius:999px;font-size:11px;color:var(--c);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);background:color-mix(in srgb,var(--c) 10%,transparent);cursor:pointer}
 .u.chatmsg{align-self:flex-start;background:rgba(40,46,80,.55);border-style:dashed;font-size:13px;opacity:.92}
 .jobwrap{margin:0}
 .jobwrap>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;align-self:flex-end;margin-left:auto;padding:3px 10px;border-radius:999px;font-size:11px;color:#ffd08acc;background:rgba(20,16,8,.35);border:1px solid rgba(255,170,40,.25);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:.75}
@@ -307,7 +324,9 @@ const PALETTE = ["var(--c1)","var(--c2)","var(--c3)","#5aa2ff","#ff6fae"];
 let MACH = {};
 const MC = new Proxy({}, {get:(_,id)=>MACH[id]?.color || "var(--c1)"});
 const MN = new Proxy({}, {get:(_,id)=>MACH[id]?.name || String(id)});
-function learnMachines(st){ (st?.machines||[]).forEach((m,i)=>{ MACH[m.id] = {name:m.name, color:m.color || PALETTE[i % PALETTE.length]}; }); }
+function learnMachines(st){ (st?.machines||[]).forEach((m,i)=>{ MACH[m.id] = {name:m.name, color:m.color || PALETTE[i % PALETTE.length]}; });
+  // the server flags chats it closed into the Done list with doneAt; they live in S.done, never in the live list
+  if(st && Array.isArray(st.sessions) && !st.done){ st.done = st.sessions.filter(x=>x.doneAt).sort((a,b)=>b.doneAt-a.doneAt); st.sessions = st.sessions.filter(x=>!x.doneAt); } }
 let picking = null;
 let armed = null;  // first tap on × arms it, second tap ends the session // launcher label waiting for a machine choice
 let S = null, openId = null, D = null;
@@ -379,11 +398,34 @@ function launchHtml(){
 function toast(t){ let e=$("#toast"); if(!e){ e=document.createElement("div"); e.id="toast"; document.body.appendChild(e); } e.textContent=t; e.className="show"; clearTimeout(toast.t); toast.t=setTimeout(()=>e.className="",2600); }
 
 // ---------- list ----------
+// "Safe to close": the server reads the CLOSE: line of a chat's latest answer (s.close). Only an idle/answered
+// chat with nothing just sent from this window counts; a new prompt clears it at once.
+function safeNow(s){ return !!(s && s.close && s.close.safe && (s.status==="idle" || s.status==="answered") && !(pendingSent[s.id]||[]).length); }
+// same parse as server.js closeOf, for the open chat (works against an older server too)
+function closeOfText(text){
+  if(!text) return null; let hit = null;
+  for(const line of String(text).split("\n")){ const mm = /^\s*(?:[-*>]\s*)?[*_`]*CLOSE[*_`]*\s*:\s*[*_`]*\s*(.*)$/i.exec(line); if(mm) hit = mm[1].replace(/[*_`]+\s*$/,"").trim(); }
+  if(hit === null) return null;
+  if(/^safe\b/i.test(hit)) return {safe:true};
+  return {safe:false, why: hit.replace(/^not\s*yet\b/i,"").replace(/^[\s\-–—:,;(]+/,"").replace(/[)\s]+$/,"").trim().slice(0,80)};
+}
+function closeForConvo(d){
+  if(!d || d.busy || d.perm || (pendingSent[openId]||[]).length) return null;
+  const t = (d.turns||[])[d.turns.length-1]; if(!t || t.open || !t.answer) return null;   // the newest prompt has no answer yet
+  const c = closeOfText(t.answer); if(c && c.safe && d.ask) return {safe:false, why:"question for you"};
+  return c;
+}
+let doneOpen = null;   // which machine's Done list is expanded
+function doneHtml(key, dn){
+  return !dn.length ? "" : `<button class="dn-pill${doneOpen===key?" on":""}" data-donebox="${key}" title="Chats closed with all their requests done; tap to see and reopen">Done<b>${dn.length}</b></button>` +
+    (doneOpen===key ? `<div class="dn-list">${dn.map(s=>`<div class="dn-row"><span>${esc(s.subject || s.title || s.last || s.label || "")}</span><small>${ago(s.doneAt)}</small><button data-reopen="${esc(s.id)}" title="Bring it back with its history">Reopen</button></div>`).join("")}</div>` : "");
+}
 function cardHtml(s){
   const st = s.status==="needs" ? `<span class="badge need">NEEDS YOU</span>`
     : s.status==="yourturn" ? `<span class="badge turn" title="${esc(s.ask||"")}">YOUR TURN</span>`
-    : s.status==="answered" ? `<span class="badge ans">NEW ANSWER</span>`
+    : s.status==="answered" && !safeNow(s) ? `<span class="badge ans">NEW ANSWER</span>`
     : s.status==="error" ? `<span class="badge err">STOPPED</span>`
+    : safeNow(s) ? `<span class="badge safe" title="Everything asked in this chat is done and nothing is pending">✓ Safe to close</span>`
     : s.status==="cooking" ? `<span class="st">${s.kind==="terminal"?"cooking · terminal":"cooking"}</span>`
     : `<span class="st">${ago(s.updated)}</span>`;
   return `<button class="card s-${s.status}" data-open="${esc(s.id)}">
@@ -406,7 +448,7 @@ function renderList(){
     const body = !m.online ? "" : list.length ? list.map(cardHtml).join("") : `<div class="empty">Nothing running. Start one below.</div>`;
     return `<section class="glass machine${m.online?"":" off"}" style="--c:${MC[m.id]}">
       <div class="m-head"><span class="m-name">${m.name}</span>${m.online?`<span class="stats">${segs0}${mem}</span>`:`<span class="m-note">○ ${esc(m.note||"offline")}</span>`}</div>
-      <div class="cards">${body}</div></section>`;
+      <div class="cards">${body}</div>${doneHtml(m.id, m.online ? (S.done||[]).filter(s=>s.machine===m.id) : [])}</section>`;
   }).join("");
   const launch = launchHtml();
   const html = `<header class="brand"><span class="orb"></span>Moonstone</header><div class="list">${m}</div>${launch}`;
@@ -509,7 +551,9 @@ function subjHtml(d){
       : r.err ? `<button class="rq-retry" id="sjretry">Couldn't read this chat, tap to retry</button>`
       : r.busy ? (r.has ? "Updating…" : "Reading this chat…")
       : !r.has ? "Reading this chat…" : !items.length ? "No requests in this chat yet." : "";
-    drop = `<div class="sj-drop">${rows}${note?`<div class="rq-note">${note}</div>`:""}</div>`;
+    const cl0 = closeForConvo(d);
+    const head = cl0 && cl0.safe ? `<div class="rq-close ok">✓ Safe to close</div>` : cl0 && cl0.why ? `<div class="rq-close">Open: ${esc(cl0.why)}</div>` : "";
+    drop = `<div class="sj-drop">${head}${rows}${note?`<div class="rq-note">${note}</div>`:""}</div>`;
   }
   if(topOpen === openId && topics.length)
     drop += `<div class="sj-side">${topics.map((t,k)=>`<button class="tp${k===topics.length-1?" cur":""}" data-topic="${t.i}"><span>${esc(t.title)}</span><small>${fmtWhen(t.ts)}</small></button>`).join("")}</div>`;
@@ -519,7 +563,10 @@ function subjHtml(d){
   // renamed by hand: the name stays, the current topic sits small beside it
   const cur = topics.length ? topics[topics.length-1].title : "";
   const side = r.renamed && cur && cur !== subj ? `<small class="sj-cur" title="What the chat is on now">${esc(cur)}</small>` : "";
-  return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(subj)}</button>${side}${spill}${pill}${drop}`;
+  const cl = closeForConvo(d);
+  const close = cl && cl.safe ? `<span class="sj-ok" title="Everything you asked in this chat is done, approved, and nothing is running or waiting">✓ Safe to close</span>`
+    : cl && cl.why ? `<span class="sj-op" title="Not safe to close yet: ${esc(cl.why)}">open: ${esc(cl.why)}</span>` : "";
+  return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(subj)}</button>${side}${close}${spill}${pill}${drop}`;
 }
 function subjPaint(d){
   const el = $("#csubj"); if(!el || $("#sjin")) return;   // never repaint under typing
@@ -704,6 +751,9 @@ document.addEventListener("click", async e=>{
     if(armed !== id){ armed = id; renderList.last = null; renderList(); setTimeout(()=>{ if(armed===id){ armed=null; renderList.last=null; renderList(); } }, 4000); return; }
     armed = null; const r = await api(`/api/session/${encodeURIComponent(id)}/close`, {});
     toast(r.ok ? "Ended" : (r.error || "Couldn't end it")); return refresh(); }
+  const db = t.closest("[data-donebox]"); if(db){ doneOpen = doneOpen===db.dataset.donebox ? null : db.dataset.donebox; renderList.last = null; return renderList(); }
+  const ro = t.closest("[data-reopen]"); if(ro){ const id = ro.dataset.reopen; const r = await api(`/api/session/${encodeURIComponent(id)}/reopen`, {});
+    if(!r.ok){ toast(r.error || "Couldn't reopen it"); return refresh(); } return open(r.id || id); }
   const o = t.closest("[data-open]"); if(o) return open(o.dataset.open);
   const pk = t.closest("[data-pick]"); if(pk){
     const opts = S.launchers.filter(x=>x.label===pk.dataset.pick);

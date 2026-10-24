@@ -1019,6 +1019,9 @@ async function reqsScan(id) {
   if (needTopics(m)) { m.topicsTried = true; m.reqsAt = 0; }   // read the whole chat once more so its subjects fill in
   const fresh = reqsFresh(m, c);
   const asks = fresh.some(t => isAsk(t.user));
+  // the reply that finished a request often lands on a turn the user didn't start (a helper agent's task notification),
+  // so open items get re-judged whenever new answers arrive, not only after a new ask
+  if (!asks && fresh.length && Array.isArray(m.reqs) && m.reqs.some(r => !FINAL.has(r.status))) m.reqsAt = fresh[fresh.length - 1].n + 1;
   if (!asks && !needReview(m)) {   // nothing new from the user but "ok"s: no model call, just move past them
     if (fresh.length && Array.isArray(m.reqs) && !c.busy) { m.reqsAt = fresh[fresh.length - 1].n + 1; m.reviewAt = m.reqsAt; saveState(); }
     return;

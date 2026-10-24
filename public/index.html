@@ -626,7 +626,7 @@ function subjHtml(d){
     drop += `<div class="sj-side">${topics.map((t,k)=>`<button class="tp${k===topics.length-1?" cur":""}" data-topic="${t.i}"><span>${esc(t.title)}</span><small>${fmtWhen(t.ts)}</small></button>`).join("")}</div>`;
   // no subject yet (old server, or the title is still being made): use the first real message, never a placeholder
   const first = (d.turns||[]).map(t=>t.user||"").find(u=>u.trim() && !/^\[Chat message, NOT from [^\]]*\]|^<task-notification>|^Continue from handoff/.test(u)) || "";
-  const subj = d.subject || first.replace(/\s+/g," ").trim().split(" ").slice(0,7).join(" ");
+  const subj = d.subject || first.replace(/\[attached file: [^\]]+\]/g,"").replace(/\s+/g," ").trim().split(" ").slice(0,7).join(" ");
   // renamed by hand: the name stays, the current topic sits small beside it
   const cur = topics.length ? topics[topics.length-1].title : "";
   const side = r.renamed && cur && cur !== subj ? `<small class="sj-cur" title="What the chat is on now">${esc(cur)}</small>` : "";

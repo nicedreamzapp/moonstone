@@ -895,7 +895,7 @@ function haikuNext() {   // one cheap claude -p at a time, on the subscription; 
   child.stdin.on("error", () => {}); child.stdin.end(job.prompt);
 }
 function trimSubject(t) {
-  t = String(t).replace(/```[\s\S]*?```/g, " ").replace(/https?:\/\/\S+/g, " ").replace(/[`*_#>\[\]"]/g, "").replace(/\s+/g, " ").trim();
+  t = String(t).replace(/\[attached file: [^\]]+\]/g, " ").replace(/```[\s\S]*?```/g, " ").replace(/https?:\/\/\S+/g, " ").replace(/[`*_#>\[\]"]/g, "").replace(/\s+/g, " ").trim();
   const w = t.split(" ").slice(0, 6).join(" ").replace(/[,.;:!?\-–—]+$/, "").slice(0, 60);
   return w ? w.charAt(0).toUpperCase() + w.slice(1) : null;
 }

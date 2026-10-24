@@ -226,8 +226,19 @@ async function stopTerminalSession(pid) {
 // ---------- dock-owned sessions ----------
 let state = { sessions: [] };
 try { state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch {}
+const FB_PAST = "— Claude had hit its limit; these replies came from the fallback model. —";
+// A fallback never survives a restart (s.fallback is not saved), but its cmd and present-tense banner were, so a
+// restarted card kept looking like the stand-in model while Claude answered. Close it out here.
+for (const s of state.sessions || []) {
+  if (s.kind === "pipe" || s.kind === "api" || !s.cmd) continue;
+  delete s.cmd;
+  const log = s.log || [];
+  if (!log.some(e => e && e.user)) s.log = [];
+  else s.log = log.map(e => e && !e.user && e.head ? { ...e, head: null, answer: FB_PAST } : e);
+}
 // what each chat keeps across restarts
 const SAVE_KEYS = ["id", "sessionId", "cwd", "label", "mode", "color", "created", "hidden", "kind", "cmd", "log", "launcher", "ctx",
+  "fbAt", "keyEnv", "envFile", "freshSeen", "freshOffer", "freshTo",
   "subject", "subjectBy", "reqs", "reqsAt", "reqsVer", "reviewAt", "topics", "logBase", "doneAt", "reopenAt"];
 const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(s => Object.fromEntries(SAVE_KEYS.map(k => [k, s[k]]))), tmeta: state.tmeta || {}, donePurgeAt: state.donePurgeAt || 0 }, null, 2));
 const procs = new Map(); // dock id -> {child, busy, perm, unread, err}
@@ -257,6 +268,10 @@ function startProc(s) {
   if (!WIN) env.PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
   else { const k = Object.keys(env).find(x => /^path$/i.test(x)) || "Path", lb = path.join(HOME, ".local", "bin");   // where chat-send is installed
     if (!String(env[k] || "").toLowerCase().includes(lb.toLowerCase())) env[k] = lb + ";" + (env[k] || ""); }
+  // a launcher with "keyEnv" runs Claude Code on that API key instead of your plan. Saved with the chat so a resume
+  // after a restart keeps it; chats saved before that are matched to their keyEnv launcher by label.
+  if (!s.keyEnv) { const kl = (loadLaunchers() || []).find(x => x.keyEnv && x.label === s.label && x.kind !== "api"); if (kl) { s.keyEnv = kl.keyEnv; s.envFile = kl.envFile; } }
+  if (s.keyEnv) { const k = apiKeyFor({ keyEnv: s.keyEnv, envFile: s.envFile }); if (k) env.ANTHROPIC_API_KEY = k; }
   const child = spawn(CLAUDE, args, { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, shell: WIN && /\.cmd$/i.test(CLAUDE) });
   const p = { child, busy: false, perm: null, unread: false, err: null, lastLine: "", born: Date.now() };
   procs.set(s.id, p);
@@ -305,8 +320,13 @@ function onEvent(s, p, d) {
     // chat messages count turns sent vs finished instead of trusting busy
     p.inflight = Math.max(0, (p.inflight || 0) - 1);
     if (!s.spare && !p.inflight) mailTurnDone(s.id);
+    if (!s.spare && !p.inflight) freshCheck(s, d);
     if (!s.spare && !p.inflight) reqsSoon(s.id);
     if (d.is_error && d.result) p.err = String(d.result).slice(0, 300);
+    else if (!d.is_error && !s.keyEnv) lastClaudeOk = Date.now();   // the plan (not an API key) answered on this machine: Claude is back for every chat
+    // Claude just said it is out of usage: keep THIS chat going on the fallback model rather than leaving it dead
+    const why = String(d.result || p.err || "");
+    if (!s.spare && (limitHit(why) || d.subtype === "error_usage_limit")) startFallback(s, why);
   }
   broadcast(s.id);
 }
@@ -319,7 +339,7 @@ function fillSpares() {
     if (CONFIG.warm && !CONFIG.warm.includes(l.label)) continue;
     const have = spares.get(l.id);
     if (have && procs.get(have.id)?.child.exitCode === null) continue;
-    const s = { id: crypto.randomUUID().slice(0, 8), sessionId: null, cwd: l.cwd, label: l.label, mode: l.mode, color: l.color, created: Date.now(), spare: true };
+    const s = { id: crypto.randomUUID().slice(0, 8), sessionId: null, cwd: l.cwd, label: l.label, mode: l.mode, color: l.color, keyEnv: l.keyEnv, envFile: l.envFile, created: Date.now(), spare: true };
     startProc(s); spares.set(l.id, s);
   }
 }
@@ -330,6 +350,109 @@ function takeSpare(l) {
 }
 setTimeout(fillSpares, 3000);
 setInterval(fillSpares, 60000);
+// ---------- in-place handoff when Claude runs out ----------
+// When Claude says it is out of usage, the chat you are already in keeps going on a model you choose (config
+// "fallback": {"launcher": "<label of a pipe launcher>"}), not a new card somewhere else. The stand-in runs through
+// the normal pipe-session machinery with MOONSTONE_TRANSCRIPT pointing at this chat's transcript (so it can pick up
+// the thread) and MOONSTONE_RESET_AT (epoch ms of the stated reset). Its replies are spliced in where Claude stopped;
+// once the reset time passes, or any chat on this machine gets a real Claude answer, the next message goes back to Claude.
+function limitHit(text) {
+  return /\b(hit your (session|usage) limit|usage limit reached|out of (usage|credits))\b/i.test(String(text || ""));
+}
+// "resets 4:10pm (America/Los_Angeles)" -> epoch ms of that moment. Unparseable: five hours out,
+// which is the length of the window anyway.
+function resetAt(text) {
+  const m = /resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(String(text || ""));
+  if (!m) return Date.now() + 5 * 3600e3;
+  let h = +m[1] % 12; if (/pm/i.test(m[3])) h += 12;
+  const d = new Date(); d.setHours(h, +(m[2] || 0), 0, 0);
+  if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+// Swap this session over to the fallback WITHOUT changing s.kind, so the transcript half of the card still
+// renders. s.fbAt freezes where the divider sits, so handing back to Claude later appends after it.
+function startFallback(s, why) {
+  if (s.fallback) return;
+  const want = (CONFIG.fallback || {}).launcher; if (!want) return;
+  const l = launchers.find(x => x.label === want && x.kind === "pipe");
+  if (!l) { console.error(`fallback launcher "${want}" is not a pipe launcher in config.json; cannot hand off in place`); return; }
+  const tp = s.sessionId ? findTranscriptCached(s.sessionId) : null;
+  s.fbAt = (fullTurns(s.id) || []).length;
+  s.fallback = { since: Date.now(), until: resetAt(why) };
+  s.cmd = l.cmd;                       // what startPipe()/sendPipe() will run for this session
+  s.fbTranscript = tp || "";           // the carryover must be THIS chat, not the newest in the folder
+  s.fbLabel = l.label;
+  s.log = [];
+  const when = new Date(s.fallback.until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  // head: the banner stays put while the stand-in's own start-up output streams into this same entry
+  const head = "— Claude hit its limit; " + l.label + " carries on here until about " + when + ". —";
+  s.log.push({ user: null, head, answer: head, ts: Date.now(), end: Date.now() });
+  const old = procs.get(s.id); if (old && !old.pipe) { try { old.child.kill("SIGTERM"); } catch {} }
+  saveState(); startPipe(s); broadcast(s.id);
+}
+function endFallback(s) {
+  const pp = procs.get(s.id); if (pp?.pipe) { pp.ended = true; killTree(pp); procs.delete(s.id); }
+  const log = s.log || [];
+  // only the banner, no real turns: drop it; otherwise keep the turns and put the banner in past tense
+  if (!log.some(e => e && e.user)) s.log = [];
+  else s.log = log.map(e => e && !e.user && e.head ? { ...e, head: null, answer: FB_PAST } : e);
+  delete s.fallback; delete s.cmd; delete s.fbTranscript; delete s.fbLabel;
+  saveState();
+}
+// the "Back to Claude" tap: end the stand-in now and have Claude ready for the next message.
+// If Claude is still limited, that message just hits the limit again and the stand-in takes over again.
+function backToClaude(s) {
+  if (!s.fallback) return false;
+  endFallback(s); deadErr.delete(s.id);
+  const p = procs.get(s.id); if (!p || p.pipe || p.child.exitCode !== null) startProc(s);
+  broadcast(s.id); return true;
+}
+// Any chat on this machine finishing a real Claude turn means the limit is over (an upgrade, or the window reset
+// early), so every chat on the stand-in comes back to Claude instead of waiting for the old reset time.
+let lastClaudeOk = 0;
+function sweepFallbacks() {
+  let n = 0;
+  for (const s of state.sessions) {
+    if (!s.fallback) continue;
+    const p = procs.get(s.id), claudeUp = p && !p.pipe && p.child && p.child.exitCode == null && (p.busy || p.born > s.fallback.since);
+    if (Date.now() >= s.fallback.until || claudeUp || lastClaudeOk > s.fallback.since) { endFallback(s); n++; }
+  }
+  if (n) broadcast();
+}
+setTimeout(sweepFallbacks, 3000); setInterval(sweepFallbacks, 30000);
+
+// ---------- "Fresh chat" when memory fills up ----------
+// When a Claude chat finishes a turn with its memory past 25% (config "fresh": {"pct": 25}, or false) and no
+// background work running, the chat offers ONE "Fresh chat" pill. It is offered once per crossing: ignored = gone until
+// the gauge drops back under and crosses again. Tapping it asks the chat for a handoff note; the first line of its
+// reply becomes the first message of a new chat in the same folder and launcher.
+const FRESH_PCT = CONFIG.fresh === false ? null : +((CONFIG.fresh || {}).pct || 25);
+const FRESH_ASK = "Moonstone fresh-chat handoff: this chat's memory is past " + FRESH_PCT + "%. Write a short handoff note to a file now " +
+  "(what is done, what is open and the next step), in your memory folder or this project's folder. " +
+  "Then reply with exactly ONE line: the note's full file path, a dash, and its title. Nothing else.";
+function freshCheck(s, d) {
+  if (s.kind === "pipe" || s.kind === "api" || s.fallback) return;
+  if (s.freshAsk) {   // this turn was the handoff request: its answer names the note
+    s.freshAsk = false;
+    const line = String(d.result || "").split("\n").map(x => x.replace(/[*`#>]/g, "").trim()).find(Boolean);
+    if (!d.is_error && line) freshLaunch(s, line.slice(0, 300));
+    return;
+  }
+  if (FRESH_PCT === null) return;
+  const tp = s.sessionId ? findTranscript(s.sessionId) : null, c = ctxOf(tp);
+  if (!c) return;
+  if (c.pct <= FRESH_PCT) { s.freshSeen = false; s.freshOffer = false; return; }
+  if (!s.freshSeen && !bgTasks(tp).length) { s.freshSeen = true; s.freshOffer = true; saveState(); }
+}
+function freshLaunch(s, line) {
+  const l = launchers.find(x => (x.kind || "claude") === "claude" && x.label === s.label && x.cwd === s.cwd);
+  const ns = (l && takeSpare(l)) || { id: crypto.randomUUID().slice(0, 8), sessionId: null, cwd: s.cwd, label: s.label, mode: s.mode, color: s.color, keyEnv: s.keyEnv, envFile: s.envFile, created: Date.now() };
+  if (s.subject) { ns.subject = s.subject; ns.subjectBy = s.subjectBy; }   // a fresh chat carries on the same topic
+  state.sessions.push(ns); s.freshTo = ns.id; saveState(); setTimeout(fillSpares, 1000);
+  send(ns, "Continue from handoff: " + line);
+  broadcast();
+}
+
 // ---------- local-model chats ("pipe" sessions) ----------
 // A "pipe" launcher runs a script that reads one line from stdin and prints "› " when it is ready
 // for the next one (a llama.cpp or MLX chat loop, for example). TERM=dumb asks it to skip colors and spinners.
@@ -339,6 +462,8 @@ setInterval(fillSpares, 60000);
 const ANSI = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\r/g;
 function startPipe(s) {
   const env = { ...process.env, PYTHONUNBUFFERED: "1", TERM: "dumb", CLAUDE_SESSION_LABEL: s.label, TQDM_DISABLE: "1" };   // no progress bars in the chat
+  // an in-place handoff names the exact transcript to carry over, and when Claude is expected back
+  if (s.fallback) { env.MOONSTONE_TRANSCRIPT = s.fbTranscript || ""; env.MOONSTONE_RESET_AT = String(s.fallback.until); }
   if (!WIN) env.PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
   // Windows has no bash: run the launcher line through the shell as written
   const child = WIN ? spawn(s.cmd, { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: true, windowsHide: true })
@@ -357,8 +482,10 @@ function startPipe(s) {
     p.out += raw.replace(ANSI, "").replace(/[^\n\r]*\d{1,3}%\|[^\n\r|]*\|[^\n\r]*\[[^\n\r\]]*\][\r]*/g, "").replace(/\r+(?!\n)/g, "");
     const turn = s.log[s.log.length - 1];
     const ready = /(^|\n)\s*›\s*$/.test(p.out);
-    turn.answer = p.out.replace(/(^|\n)\s*›\s*$/, "").replace(/^\s+|\s+$/g, "").slice(-20000);
-    if (ready) { p.busy = false; p.unread = true; p.out = ""; turn.end = Date.now(); if (p.liveTok) turn.tok = p.liveTok; saveState(); reqsSoon(s.id); }
+    let ans = p.out.replace(/(^|\n)\s*›\s*$/, "").replace(/^\s+|\s+$/g, "");
+    if (turn.head) ans = turn.head + (ans ? "\n\n" + ans : "");   // the fallback banner stays on top of the stand-in's start-up output
+    turn.answer = ans.slice(-20000);
+    if (ready) { p.busy = false; p.unread = true; p.out = ""; turn.end = Date.now(); if (p.liveTok) turn.tok = p.liveTok; if (s.fallback) turn.model = s.fbLabel; saveState(); if (s.kind === "pipe") reqsSoon(s.id); }
     broadcast(s.id);
   };
   child.stdout.on("data", onOut); child.stderr.on("data", onOut);
@@ -392,11 +519,22 @@ setInterval(() => {
 // Talks to an OpenAI-style server (llama.cpp's llama-server, Ollama, LM Studio...). If the launcher has a
 // "serve" command, the dock starts that server on the first message and stops it after 30 idle
 // minutes so the RAM comes back.
+// A hosted API is an "api" launcher with an https url and a key: {"kind":"api","url":"https://...","model":"...","keyEnv":"NAME"}.
+// The key is read at call time from the environment, or from "envFile" (a KEY=value file outside any synced folder).
+// The same keyEnv on a "claude" launcher runs Claude Code on that API key instead of your plan.
+const tilde = v => (v ? String(v).replace(/^~/, HOME) : v);
+function apiKeyFor(l) {
+  if (!l.keyEnv) return null;
+  if (process.env[l.keyEnv]) return process.env[l.keyEnv];
+  const file = l.envFile || CONFIG.envFile; if (!file) return null;
+  try { const m = fs.readFileSync(tilde(file), "utf8").match(new RegExp("^" + l.keyEnv + "=(.*)$", "m")); return m ? m[1].trim().replace(/^["']|["']$/g, "") : null; } catch { return null; }
+}
 const servers = new Map(); // launcher id -> { child, lastUsed, ready }
 function getJSON(url, timeout = 3000) {
-  return new Promise(res => { const r = http.get(url, { timeout }, x => { let b = ""; x.on("data", c => (b += c)); x.on("end", () => res(x.statusCode === 200 ? b : null)); }); r.on("error", () => res(null)); r.on("timeout", () => { r.destroy(); res(null); }); });
+  return new Promise(res => { const r = (url.startsWith("https:") ? require("https") : http).get(url, { timeout }, x => { let b = ""; x.on("data", c => (b += c)); x.on("end", () => res(x.statusCode === 200 ? b : null)); }); r.on("error", () => res(null)); r.on("timeout", () => { r.destroy(); res(null); }); });
 }
 async function ensureServer(l, onNote) {
+  if (l.keyEnv || /^https:/.test(l.url)) return true;   // hosted API: nothing to start, no health check to poll
   const health = l.url + (l.health || "/health");   // Ollama answers on "/" instead
   if (await getJSON(health)) return true;
   if (!l.serve) return false;
@@ -426,8 +564,10 @@ async function sendApi(s, text) {
   const messages = [];
   if (l.system) messages.push({ role: "system", content: l.system });
   for (const t of s.log.slice(-20)) { if (t.user) messages.push({ role: "user", content: t.user }); if (t.answer && t !== turn) messages.push({ role: "assistant", content: t.answer }); }
+  const apiKey = apiKeyFor(l); if (l.keyEnv && !apiKey) return fail("No " + l.keyEnv + " in the environment or envFile, so I can't reach " + l.label + ".");
   const u = new URL(l.url + "/v1/chat/completions");
-  const req = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { "content-type": "application/json" } }, res => {
+  const req = (u.protocol === "https:" ? require("https") : http).request({ host: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { "content-type": "application/json", ...(apiKey ? { authorization: "Bearer " + apiKey } : {}) } }, res => {
+    if (res.statusCode >= 400) { let b = ""; res.on("data", c => (b += c)); res.on("end", () => { let m = b; try { m = JSON.parse(b).error || b; } catch {} fail(l.label + " said no (" + res.statusCode + "): " + String(typeof m === "object" ? m.message || JSON.stringify(m) : m).slice(0, 300)); }); return; }
     let buf = "", last = 0;
     res.on("data", c => {
       buf += c; const lines = buf.split("\n"); buf = lines.pop();
@@ -463,6 +603,12 @@ setInterval(() => {
 function sendLine(p, obj) { p.child.stdin.write(JSON.stringify(obj) + "\n"); }
 
 function send(s, text) {
+  // while this chat is on the fallback model, messages go there. Once the stated reset time has passed (or Claude
+  // answered anywhere on this machine), the next message goes back to Claude in this same card.
+  if (s.fallback) {
+    if (Date.now() < s.fallback.until && lastClaudeOk <= s.fallback.since) return sendPipe(s, text);
+    endFallback(s);
+  }
   if (s.kind === "pipe") return sendPipe(s, text);
   if (s.kind === "api") return void sendApi(s, text);
   let p = procs.get(s.id);
@@ -527,7 +673,7 @@ function listSessions() {
     owned.add(s.sessionId);
     if (s.hidden) continue;
     // a session opened but never used (no message sent) tidies itself away after 30 minutes
-    if (!s.sessionId && !(s.log && s.log.some(t => t.user)) && !procs.get(s.id)?.busy && Date.now() - s.created > 30 * 60e3) {
+    if (!s.sessionId && !(s.log && s.log.some(t => t.user || t.answer)) && !procs.get(s.id)?.busy && Date.now() - s.created > 30 * 60e3) {
       const p0 = procs.get(s.id); if (p0) (p0.pipe ? killTree(p0) : p0.child.kill("SIGTERM"));
       s.hidden = true; saveState(); continue;
     }
@@ -635,8 +781,20 @@ function fullTurns(id) {
   const p = procs.get(id);
   if (s.kind === "pipe" || s.kind === "api") return (s.log || []).map((t, i, a) => ({ i, user: t.user, answer: t.answer || null, work: [], open: !!p?.busy && i === a.length - 1, secs: t.end ? Math.round((t.end - t.ts) / 1000) : null, tok: t.tok || 0 }));
   const tp = findTranscript(s.sessionId); const f = tp ? readFileModel(tp) : null;
-  const turns = f ? shapeTurns(f.model, !!p?.busy) : [];
-  if (p?.busy && (!turns.length || !turns[turns.length - 1].open)) turns.push({ i: turns.length, user: p.pendingText || null, answer: null, work: [], open: true });
+  let turns = f ? shapeTurns(f.model, !!p?.busy) : [];
+  // a chat that ran out of Claude has a block of fallback turns spliced in at the point where that happened,
+  // so handing back to Claude later appends after it and nothing reorders
+  if (s.log && s.log.length) {
+    // no saved fbAt (after a restart): slot the block in by time, never just at the bottom
+    const byTime = () => { const t0 = s.log[0]?.ts, k = t0 && f ? f.model.turns.findIndex(t => t.ts && t.ts > t0) : -1; return k >= 0 ? k : turns.length; };
+    const at = Math.min(typeof s.fbAt === "number" ? s.fbAt : byTime(), turns.length);
+    const fb = s.log.map(t => ({ user: t.user, answer: t.answer || null, work: [], fallback: true, banner: !!(t.head && s.fallback),
+      open: !!p?.busy && p.pipe && t === s.log[s.log.length - 1],
+      secs: t.end ? Math.round((t.end - t.ts) / 1000) : null, tok: t.tok || 0 }));
+    turns = turns.slice(0, at).concat(fb, turns.slice(at));
+    turns.forEach((t, i) => { t.i = i; });
+  }
+  if (p?.busy && !p.pipe && (!turns.length || !turns[turns.length - 1].open)) turns.push({ i: turns.length, user: p.pendingText || null, answer: null, work: [], open: true });
   return turns;
 }
 // ---------- subject bar + requests checklist (10/21) ----------
@@ -1234,7 +1392,9 @@ function sessionDetail(id) {
   const turns = lean(fullTurns(id));
   return { id, kind: "dock", local: s.kind === "pipe" || s.kind === "api", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd, subject: subjectFor(id), reqs: reqsView(id),
     busy: !!p?.busy, liveTok: p?.busy ? p.liveTok || 0 : null, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
-    err: p?.err || deadErr.get(id) || null, turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) || s.ctx || null,
+    err: (e => s.fallback && limitHit(e) ? null : e)(p?.err || deadErr.get(id) || null), turns, jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) || s.ctx || null,   // the banner already says Claude hit its limit
+    fallback: s.fallback ? { until: s.fallback.until, model: s.fbLabel || null } : null,
+    fresh: s.freshTo ? { to: s.freshTo } : s.freshAsk ? { asking: true } : s.freshOffer ? { offer: true } : null,
     ask: !p?.busy && !p?.perm && f ? askOf(lastAnswer(f.model)) : null,
     close: !p?.busy && !p?.perm && f ? closeOf(lastAnswer(f.model)) : null };
 }
@@ -1828,7 +1988,7 @@ const server = http.createServer(async (req, res) => {
           state.sessions.push(s); startPipe(s); saveState(); broadcast();
           return json(res, 200, { id: s.id });
         }
-        const s = takeSpare(l) || { id: crypto.randomUUID().slice(0, 8), sessionId: null, cwd: l.cwd, label: l.label, mode: l.mode, color: l.color, created: Date.now() };
+        const s = takeSpare(l) || { id: crypto.randomUUID().slice(0, 8), sessionId: null, cwd: l.cwd, label: l.label, mode: l.mode, color: l.color, keyEnv: l.keyEnv, envFile: l.envFile, created: Date.now() };
         state.sessions.push(s); saveState(); setTimeout(fillSpares, 1000);
         if (b.text) send(s, b.text);
         // "opening": a shell command whose output is the chat's first message (Story Forge's briefing,
@@ -1893,7 +2053,13 @@ const server = http.createServer(async (req, res) => {
       if (parts[3] === "send") {
         if (!String(b.text || "").trim()) return json(res, 400, { error: "empty" });
         s.wake = null; typingAt.delete(s.id);   // the user's own message: whatever chat-to-chat chain was running ends here
+        if (s.freshOffer || s.freshAsk) { s.freshOffer = false; s.freshAsk = false; saveState(); }
         send(s, String(b.text)); return json(res, 200, { ok: true });
+      }
+      if (parts[3] === "claude") return json(res, 200, { ok: true, switched: backToClaude(s) });   // the fallback banner's "Back to Claude"
+      if (parts[3] === "fresh") {   // the "Fresh chat" pill
+        if (p?.busy || p?.perm || s.fallback || s.kind === "pipe" || s.kind === "api") return json(res, 409, { error: "that chat is busy" });
+        s.freshOffer = false; s.freshAsk = true; delete s.freshTo; send(s, FRESH_ASK); return json(res, 200, { ok: true });
       }
       if (parts[3] === "perm") {
         if (!p?.perm || p.perm.request_id !== b.request_id) return json(res, 409, { error: "that question is gone" });

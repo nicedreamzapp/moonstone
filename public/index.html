@@ -282,6 +282,7 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .sj-ok{margin-left:auto;flex:none;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;color:#b9f5d6;background:rgba(62,224,143,.13);border:1px solid rgba(62,224,143,.5);box-shadow:0 0 10px rgba(62,224,143,.22)}
 .sj-op{margin-left:auto;flex:0 1 auto;min-width:0;max-width:150px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:10.5px;color:rgba(255,171,61,.75)}
 .sj-ok~.sj-r,.sj-op~.sj-r{margin-left:0}
+button.sj-ok{font-family:inherit;cursor:pointer}
 @media (max-width:700px){.sj-op{max-width:90px}}
 .badge.safe{color:#b9f5d6;background:rgba(62,224,143,.12);border:1px solid rgba(62,224,143,.48);padding:3px 9px;font-weight:600}
 .rq-close{font-size:11.5px;padding:5px 6px 6px;color:rgba(255,171,61,.9);border-bottom:1px solid var(--rim2);margin-bottom:2px}
@@ -631,7 +632,7 @@ function subjHtml(d){
   const cur = topics.length ? topics[topics.length-1].title : "";
   const side = r.renamed && cur && cur !== subj ? `<small class="sj-cur" title="What the chat is on now">${esc(cur)}</small>` : "";
   const cl = closeForConvo(d);
-  const close = cl && cl.safe ? `<span class="sj-ok" title="Everything you asked in this chat is done, approved, and nothing is running or waiting">✓ Safe to close</span>`
+  const close = cl && cl.safe ? (d.kind==="dock" ? `<button class="sj-ok" data-safeclose="1" title="Everything you asked in this chat is done: tap to close the chat">✓ Safe to close</button>` : `<span class="sj-ok" title="Everything you asked in this chat is done, approved, and nothing is running or waiting">✓ Safe to close</span>`)
     : cl && cl.why ? `<span class="sj-op" title="Not safe to close yet: ${esc(cl.why)}">open: ${esc(cl.why)}</span>` : "";
   return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(subj)}</button>${side}${close}${spill}${pill}${drop}`;
 }
@@ -703,7 +704,7 @@ function renderConvo(keepScroll){
   const att = `<button class="micb att" id="att" title="Attach a photo or file">${PLUS_SVG}</button>`;
   const again = `<button class="micb again" id="again" title="Hear the last answer again">↻<span class="lbl"> Hear again</span></button>`;
   const compose = `<div class="glass compose" style="--c:${c}">${att}<textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}${again}<button class="send" id="send">Send</button></div>`;
-  const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>${d.kind==="dock"?`<button class="ghost" id="close" title="End this session">End</button>`:""}`;
+  const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>`;   // the green Safe to close pill in the subject bar closes the chat
   const jobs = (d.ask && !d.busy && !d.perm ? `<div class="yourturn"><b>YOUR TURN</b><div class="tq">${esc(d.ask)}</div><div class="qr">${quickAnswers(d).map(o=>`<button class="qa ${qaTone(o)}" data-quick="${esc(o)}">${esc(o)}</button>`).join("")}<button class="qa type" data-type="1">Type something</button></div></div>` : "") + jobsHtml(d);
   turnTitle(!!(d.ask && !d.busy && !d.perm));
   const body = `${turns||`<div class="empty">Say what you want ${esc(d.label)} to do.</div>`}${ask}${notes}${jobs}`;
@@ -856,7 +857,7 @@ document.addEventListener("click", async e=>{
   if(t.closest("[data-fresh]")){ const id = openId; const r = await api(`/api/session/${encodeURIComponent(id)}/fresh`,{}); if(r.ok){ freshTap.add(id); toast("Writing a handoff note, then opening a fresh chat"); } else toast(r.error || "Couldn't start it"); return refresh(); }
   if(t.closest("#send")){ if(rec){ if(rec.state === "recording") rec.stop(); return; } if(micUi.cls) return; return sendMsg(); }
   if(t.closest("#stop")) return api(`/api/session/${openId}/stop`,{});
-  if(t.closest("#close")){ await api(`/api/session/${openId}/close`,{}); return back(); }
+  if(t.closest("[data-safeclose]")){ await api(`/api/session/${openId}/close`,{}); return back(); }
   if(t.closest("#cont")){ const [mach, local] = openId.includes("~") ? openId.split("~") : [null, openId];
     const r = await api("/api/continue",{sessionId:local.slice(2), machine:mach||undefined}); return r.id?open(r.id):null; }
   const a = t.closest("[data-allow]"); if(a){ await api(`/api/session/${openId}/perm`,{request_id:D.perm.request_id, allow:a.dataset.allow==="1"}); return refresh(); }

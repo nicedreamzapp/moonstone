@@ -226,7 +226,10 @@ async function stopTerminalSession(pid) {
 // ---------- dock-owned sessions ----------
 let state = { sessions: [] };
 try { state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch {}
-const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(({ id, sessionId, cwd, label, mode, color, created, hidden, kind, cmd, log, launcher, subject, subjectBy, reqs, reqsAt, reqsFix, topics, logBase }) => ({ id, sessionId, cwd, label, mode, color, created, hidden, kind, cmd, log, launcher, subject, subjectBy, reqs, reqsAt, reqsFix, topics, logBase })), tmeta: state.tmeta || {} }, null, 2));
+// what each chat keeps across restarts
+const SAVE_KEYS = ["id", "sessionId", "cwd", "label", "mode", "color", "created", "hidden", "kind", "cmd", "log", "launcher", "ctx",
+  "subject", "subjectBy", "reqs", "reqsAt", "reqsVer", "reviewAt", "topics", "logBase"];
+const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(s => Object.fromEntries(SAVE_KEYS.map(k => [k, s[k]]))), tmeta: state.tmeta || {} }, null, 2));
 const procs = new Map(); // dock id -> {child, busy, perm, unread, err}
 
 const tpCache = new Map();
@@ -618,7 +621,7 @@ function metaOf(id) {   // where a chat's subject + requests live: its dock sess
 }
 function tmetaCarry(sid) {   // a terminal chat moving into the dock keeps its subject and list
   const t = state.tmeta?.[sid]; if (!t) return {}; delete state.tmeta[sid];
-  const { subject, subjectBy, reqs, reqsAt, topics } = t; return { subject, subjectBy, reqs, reqsAt, topics };
+  const { subject, subjectBy, reqs, reqsAt, reqsVer, reviewAt, topics } = t; return { subject, subjectBy, reqs, reqsAt, reqsVer, reviewAt, topics };
 }
 // the chat's turns in one shape, whatever kind it is: {user, answer, use: {model: tokens}} plus a stable numbering base
 const subCache = new Map();   // subagent file -> {size, use}
@@ -681,14 +684,14 @@ function chatTurns(id, withUse) {
   return { busy, base: 0, kind: "claude", turns };
 }
 const HAIKU_Q = []; let haikuBusy = false;
-function haiku(prompt, timeout = 90e3) { return new Promise(done => { HAIKU_Q.push({ prompt, timeout, done }); haikuNext(); }); }
+function haiku(prompt, timeout = 90e3, model = "haiku") { return new Promise(done => { HAIKU_Q.push({ prompt, timeout, done, model }); haikuNext(); }); }
 function haikuNext() {   // one cheap claude -p at a time, on the subscription; no hooks, tools, MCP or saved session
   if (haikuBusy || !HAIKU_Q.length) return;
   const job = HAIKU_Q.shift();
   if (!CLAUDE) { job.done(null); return haikuNext(); }
   haikuBusy = true;
-  const E = WIN ? '""' : "";   // an empty argument has to survive cmd.exe on the PC
-  const args = ["-p", "--model", "haiku", "--no-session-persistence", "--setting-sources", E, "--strict-mcp-config", "--tools", E, "--disable-slash-commands"];
+  const E = WIN ? '""' : "";   // an empty argument has to survive cmd.exe on Windows
+  const args = ["-p", "--model", job.model || "haiku", "--no-session-persistence", "--setting-sources", E, "--strict-mcp-config", "--tools", E, "--disable-slash-commands"];
   const env = { ...process.env }; delete env.CLAUDE_SESSION_LABEL; delete env.MOONSTONE_PORT;
   if (!WIN) env.PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
   let out = "", fin = false, timer = null, child = null;
@@ -717,7 +720,7 @@ function refineSubject(id, text) {   // once per chat: "auto" -> "ai" (Haiku's) 
     saveState(); broadcast(id);
   });
 }
-function subjectFor(id) {   // what the chat is about NOW: a rename, else the latest topic, else the opening subject
+function subjectFor(id) {   // what the chat is about NOW: his rename, else the latest topic, else the opening subject
   const m = metaOf(id); if (!m) return null;
   const topic = Array.isArray(m.topics) && m.topics.length ? m.topics[m.topics.length - 1].title : null;
   if (m.subjectBy === "user" && m.subject) return m.subject;
@@ -744,32 +747,71 @@ async function otherChats(id) {
 const SENT_RULE = "\"sent\" means the request was handed to another chat instead of being done here: the reply says it was forwarded (chat-send, " +
   "\"passed it to the ... chat\", \"told the other chat\") or the request clearly belongs to one of the other live chats listed. Its note names where, " +
   "like \"sent to Laptop · Release notes\".";
-const needFix = m => Array.isArray(m.reqs) && !((m.reqsFix === true ? 1 : m.reqsFix || 0) >= 2) && m.reqs.some(r => r.status !== "done");   // 2 = re-checked with "sent"
-async function reqsFixPass(m, c, others) {   // the open items, checked once against every later turn (finishes that came many turns later were missed)
-  const open = m.reqs.map((r, k) => ({ ...r, k })).filter(r => r.status !== "done"); if (!open.length) return true;
-  const from = Math.min(...open.map(r => r.askedTurn ?? 0));
+// A request whose only step left is someone else's (a store review, the next delivery, the user's own later
+// action) is "waiting": shown apart in the pill ("28/28 · 2 waiting"), never counted as unfinished, and it doesn't hold the
+// Done list. It stays unsettled, so later reviews can still turn it into done.
+// A long chat changes its mind. A request a later
+// one replaced is "superseded", one the user called off is "cancelled": both are shown apart and counted neither done nor open.
+// "ok" / "yes" / "continue" are acknowledgements, not requests, and never start a model call. After every scan the items
+// still open are re-judged against the WHOLE chat (not once, not just the new turns). Lists made by older rules rebuild once.
+const REQS_VER = 3;
+// judging "replaced or called off" across a whole long chat is a judgment call Haiku got wrong in testing; it runs only after
+// the user asks for something new, so Sonnet stays a small cost
+const REVIEW_MODEL = "sonnet";
+const FINAL = new Set(["done", "sent", "superseded", "cancelled"]);
+const STATUSES = ["done", "open", "waiting", "sent", "superseded", "cancelled"];
+const ACK_WORDS = new Set("ok okay k kk okey yes yeah yea yep yup ya y sure go ahead do it that sounds good great perfect nice cool awesome thanks thank you thx ty please pls plz got agreed right correct alright fine keep going proceed carry on on continue resume cont lets let's approved love looks".split(" "));
+function lev(a, b) { const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length]; }
+function isAck(t) {   // a short reply made only of yes / ok / continue words (typos like "conitnue" included)
+  if (!isUser(t)) return false;
+  const w = String(t).toLowerCase().replace(/[^a-z' ]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  return w.length <= 6 && w.every(x => ACK_WORDS.has(x) || (x.length >= 6 && lev(x, "continue") <= 2) || (x.length >= 3 && x.length <= 5 && lev(x, "okay") <= 1));
+}
+const isAsk = t => isUser(t) && !isAck(t);
+function turnLine(t, uMax, aMax) {
+  const u = isAck(t.user) ? `Turn ${t.n} USER (acknowledgement, not a request): ${clip(t.user, 40)}`
+    : isUser(t.user) ? `Turn ${t.n} USER: ${clip(t.user, uMax)}`
+    : t.user ? `Turn ${t.n} (automated message, not from the user): ${clip(t.user, 60)}` : `Turn ${t.n}`;
+  return u + (t.answer ? `\nTurn ${t.n} ASSISTANT: ${clip(t.answer, aMax)}` : "");
+}
+const STATUS_RULE = "status is \"done\" (an assistant reply after it says it was built, pushed, installed, live, fixed, answered or done, even many turns later, " +
+  "or the user confirms it; a hold/wait instruction that a later message lifted is done), \"superseded\" (a later request or decision replaced it: a new design " +
+  "replaced the one it was for, a different tool or approach was chosen, its output was deliberately deleted or redone in a new form, or it was folded into a " +
+  "bigger later request; note names what replaced it), \"cancelled\" (the user said to stop, drop or not do it, or ruled it out, and never brought it back; a " +
+  "pause the user later lifted with \"continue\" is NOT a cancellation, judge what happened after), \"waiting\" (our side is finished and the only step left " +
+  "belongs to someone outside this chat: an answer or review from an app store, a customer, supplier or other company, a future event such as the next " +
+  "drive, trip, delivery or scheduled date, or something the user will do later; note names what it waits on, e.g. \"waiting on store review\"), " +
+  "\"sent\" (handed to another chat, see below) or \"open\" (work the assistant still owes: not built, not finished, not answered, or a fix still due; " +
+  "when in doubt between open and waiting, it is open unless the assistant's part is clearly complete).";
+const needReview = m => Array.isArray(m.reqs) && m.reviewAt !== m.reqsAt && m.reqs.some(r => !FINAL.has(r.status));
+async function reqsReview(m, c, others) {   // every unsettled item, re-judged against every later turn of the whole chat
+  const live = m.reqs.map((r, k) => ({ ...r, k })).filter(r => !FINAL.has(r.status)); if (!live.length) return true;
+  const from = Math.min(...live.map(r => r.askedTurn ?? 0));
   const turns = c.turns.slice(0, c.turns.length - (c.busy ? 1 : 0)).map((t, i) => ({ ...t, n: c.base + i })).filter(t => t.n >= from && t.n < (m.reqsAt ?? Infinity));
   const chunks = []; let cur = [], size = 0;
-  for (const t of turns) { const n = Math.min(300, String(t.user || "").length) + Math.min(400, String(t.answer || "").length) + 40;
+  for (const t of turns) { const n = (isAsk(t.user) ? Math.min(400, String(t.user).length) : 50) + Math.min(400, String(t.answer || "").length) + 40;
     if (cur.length && size + n > 60000) { chunks.push(cur); cur = []; size = 0; } cur.push(t); size += n; }
   if (cur.length) chunks.push(cur);
+  const all = JSON.stringify(m.reqs.map((r, k) => ({ id: k, text: r.text, askedTurn: r.askedTurn, status: r.status })));
   for (const part of chunks) {
-    const still = open.filter(r => m.reqs[r.k].status !== "done"); if (!still.length) break;
-    const lines = part.map(t => (isUser(t.user) ? `Turn ${t.n} USER: ${clip(t.user, 300)}` : `Turn ${t.n}`) + (t.answer ? `\nTurn ${t.n} ASSISTANT: ${clip(t.answer, 400)}` : "")).join("\n\n");
-    const prompt = "These requests from the user are marked not done:\n" + JSON.stringify(still.map(r => ({ id: r.k, text: r.text, askedTurn: r.askedTurn }))) + "\n\n" +
+    const still = live.filter(r => !FINAL.has(m.reqs[r.k].status) && !m.reqs[r.k].drop); if (!still.length) break;
+    const prompt = "Every request the user made in this chat, for context (JSON):\n" + all + "\n\n" +
+      "Judge ONLY these unsettled ones (ids):\n" + JSON.stringify(still.map(r => ({ id: r.k, text: r.text, askedTurn: r.askedTurn }))) + "\n\n" +
       "Other live chats: " + (others.length ? others.join("; ") : "none") + "\n\n" +
-      "Chat turns (shortened):\n\n" + lines + "\n\n" +
-      "For each request decide if it is done: done if ANY assistant reply after it was asked says it was built, pushed, installed, live, fixed or done, even many turns later, " +
-      "or if the user confirms it. \"drop\" if it was only a question, chit-chat, a duplicate of another request, or superseded by a later request. " +
-      SENT_RULE + " " +
-      "Reply with ONLY JSON: [{\"id\":0,\"status\":\"done|open|waiting|sent|drop\",\"doneTurn\":null,\"note\":\"under 8 words\"}]";
-    const out = await haiku(prompt, 150e3); if (!out) return false;
+      "Chat turns (shortened, in order):\n\n" + part.map(t => turnLine(t, 400, 400)).join("\n\n") + "\n\n" +
+      "Read every turn after each item was asked and decide where it stands now. " + STATUS_RULE + " " + SENT_RULE + " " +
+      "Use \"drop\" if it was never a real request: an acknowledgement (ok, yes, continue), chit-chat, or a duplicate of another item. " +
+      "doneTurn is the turn that settled it (done, superseded or cancelled), else null.\n" +
+      "Reply with ONLY JSON: [{\"id\":0,\"status\":\"done|open|waiting|sent|superseded|cancelled|drop\",\"doneTurn\":null,\"note\":\"under 8 words\"}]";
+    const out = await haiku(prompt, 240e3, REVIEW_MODEL); if (!out) return false;
     const j = out.match(/\[[\s\S]*\]/); if (!j) return false;
     let arr; try { arr = JSON.parse(j[0]); } catch { return false; }
     for (const x of Array.isArray(arr) ? arr : []) {
       const r = m.reqs[x?.id]; if (!r || !still.some(o => o.k === x.id)) continue;
       if (x.status === "drop") r.drop = true;
-      else if (["done", "open", "waiting", "sent"].includes(x.status)) { r.status = x.status; if (Number.isInteger(x.doneTurn)) r.doneTurn = x.doneTurn; }
+      else if (STATUSES.includes(x.status)) { r.status = x.status; if (Number.isInteger(x.doneTurn)) r.doneTurn = x.doneTurn; }
       if (x.note) r.note = clip(x.note, 50);
     }
   }
@@ -780,43 +822,48 @@ const needTopics = m => Array.isArray(m.reqs) && !(Array.isArray(m.topics) && m.
 async function reqsScan(id) {
   const m = metaOf(id); if (!m || reqsRun.has(id)) return;
   const c = chatTurns(id); if (!c) return;
+  if (Array.isArray(m.reqs) && m.reqsVer !== REQS_VER) { m.reqs = null; m.reqsAt = 0; m.reviewAt = null; m.topics = []; delete m.reqsFix; }   // made by older rules: read the whole chat again
   if (needTopics(m)) { m.topicsTried = true; m.reqsAt = 0; }   // read the whole chat once more so its subjects fill in
   const fresh = reqsFresh(m, c);
-  if (!fresh.some(t => isUser(t.user)) && !needFix(m)) return;        // nothing new from the user: no model call
+  const asks = fresh.some(t => isAsk(t.user));
+  if (!asks && !needReview(m)) {   // nothing new from the user but "ok"s: no model call, just move past them
+    if (fresh.length && Array.isArray(m.reqs) && !c.busy) { m.reqsAt = fresh[fresh.length - 1].n + 1; m.reviewAt = m.reqsAt; saveState(); }
+    return;
+  }
   if (!CLAUDE) { m.reqsErr = "unavailable"; return; }
   reqsRun.add(id); m.reqsErr = null; broadcast(id);
   try {
     const others = await otherChats(id);
-    if (needFix(m)) { if (!(await reqsFixPass(m, c, others))) { m.reqsErr = "failed"; saveState(); return; } m.reqsFix = 2; saveState(); broadcast(id); }
-    if (!fresh.some(t => isUser(t.user))) return;
-    // chunks of about 60k characters, so even a long old chat fills in a call or two
-    const chunks = []; let cur = [], size = 0;
-    for (const t of fresh) { const n = Math.min(400, String(t.user || "").length) + Math.min(260, String(t.answer || "").length) + 40;
-      if (cur.length && size + n > 60000) { chunks.push(cur); cur = []; size = 0; } cur.push(t); size += n; }
-    if (cur.length) chunks.push(cur);
-    for (const part of chunks) {
-      const next = await reqsAsk(Array.isArray(m.reqs) ? m.reqs : [], Array.isArray(m.topics) ? m.topics : [], part, others);
-      if (!next) { m.reqsErr = "failed"; saveState(); return; }
-      if (!Array.isArray(m.reqs)) m.reqsFix = 2;
-      m.reqs = next.reqs; if (next.topics.length) m.topics = next.topics; m.reqsAt = part[part.length - 1].n + 1; m.reqsErr = null; saveState(); broadcast(id);
+    if (asks) {
+      // chunks of about 60k characters, so even a long old chat fills in a call or two
+      const chunks = []; let cur = [], size = 0;
+      for (const t of fresh) { const n = (isAsk(t.user) ? Math.min(400, String(t.user).length) : 50) + Math.min(260, String(t.answer || "").length) + 40;
+        if (cur.length && size + n > 60000) { chunks.push(cur); cur = []; size = 0; } cur.push(t); size += n; }
+      if (cur.length) chunks.push(cur);
+      for (const part of chunks) {
+        const next = await reqsAsk(Array.isArray(m.reqs) ? m.reqs : [], Array.isArray(m.topics) ? m.topics : [], part, others);
+        if (!next) { m.reqsErr = "failed"; saveState(); return; }
+        m.reqs = next.reqs; m.reqsVer = REQS_VER; if (next.topics.length) m.topics = next.topics; m.reqsAt = part[part.length - 1].n + 1; m.reqsErr = null; saveState(); broadcast(id);
+      }
     }
+    if (needReview(m)) { if (!(await reqsReview(m, c, others))) { m.reqsErr = "failed"; saveState(); return; } m.reviewAt = m.reqsAt; saveState(); broadcast(id); }
   } finally { reqsRun.delete(id); broadcast(id); }
 }
 async function reqsAsk(list, topics, turns, others = []) {
-  const lines = turns.map(t => (isUser(t.user) ? `Turn ${t.n} USER: ${clip(t.user, 400)}` : t.user ? `Turn ${t.n} (automated message, not from the user): ${clip(t.user, 80)}` : `Turn ${t.n}`)
-    + (t.answer ? `\nTurn ${t.n} ASSISTANT: ${clip(t.answer, 260)}` : "")).join("\n\n");
+  const lines = turns.map(t => turnLine(t, 400, 260)).join("\n\n");
   const prompt = "You keep two lists for a chat between the user and their AI assistant: the requests the user made, and the topics the chat moved through.\n\n" +
     "Requests so far (JSON):\n" + JSON.stringify(list.map(r => ({ text: r.text, askedTurn: r.askedTurn, doneTurn: r.doneTurn, status: r.status, note: r.note || "" }))) + "\n\n" +
     "Topics so far (JSON):\n" + JSON.stringify(topics.map(t => ({ title: t.title, startTurn: t.startTurn }))) + "\n\n" +
     "Other live chats: " + (others.length ? others.join("; ") : "none") + "\n\n" +
     "New turns of the chat (shortened):\n\n" + lines + "\n\n" +
     "Update both lists.\n" +
-    "requests: add each distinct thing the user asked to be done in the new turns, as a short 3-8 word label (skip thanks, ok, small talk, and messages that only answer " +
-    "the assistant's question). Keep every earlier item. An item is done if ANY later assistant reply says it was built, pushed, installed, live, fixed or done, " +
-    "even many turns after it was asked, or if the user confirms it; check every open item against every new turn. Merge duplicates and near-duplicates into one item. " +
-    "Drop items that were only questions, chit-chat, or superseded by a later request. status is \"done\" (the assistant did it), " +
-    "\"waiting\" (the assistant is waiting on the user for it), \"sent\" (handed to another chat, see below) or \"open\" (not done yet). " + SENT_RULE + " askedTurn is the turn the user asked in; doneTurn is the turn whose reply finished it, or null. " +
-    "note is a short reason under 8 words, e.g. \"pushed and live on M5\" or \"waiting on the user's OK\".\n" +
+    "requests: add each distinct thing the user asked to be done in the new turns, as a short 3-8 word label. Skip acknowledgements (ok, yes, continue, go), " +
+    "thanks, small talk, and messages that only answer the assistant's question. One message usually is ONE request: details of the same deliverable " +
+    "(what a video should show, what a page should include) belong in that one item, not separate ones. Keep every earlier item. " +
+    "Check every earlier item that is not settled against every new turn: a new turn can finish it, replace it or call it off. " +
+    "Merge duplicates and near-duplicates into one item. Drop items that were only chit-chat. " + STATUS_RULE + " " + SENT_RULE +
+    " askedTurn is the turn the user asked in; doneTurn is the turn that settled it, or null. " +
+    "note is a short reason under 8 words, e.g. \"pushed and live on Laptop\", \"replaced by the new design\" or \"user stopped this work\".\n" +
     "topics: keep the earlier topics; add a new one only when the chat really changes subject, as a 3-6 word title and the turn it started. The first topic starts at the chat's first turn.\n" +
     "Reply with ONLY this JSON: {\"requests\":[{\"text\":\"...\",\"askedTurn\":0,\"doneTurn\":null,\"status\":\"open\",\"note\":\"...\"}],\"topics\":[{\"title\":\"...\",\"startTurn\":0}]}";
   const out = await haiku(prompt, 150e3); if (!out) return null;
@@ -825,12 +872,11 @@ async function reqsAsk(list, topics, turns, others = []) {
   if (!o || !Array.isArray(o.requests)) return null;
   const int = v => Number.isInteger(v) ? v : (typeof v === "string" && /^\d+$/.test(v) ? +v : null);
   const reqs = o.requests.filter(x => x && x.text).slice(0, 100).map(x => ({ text: clip(x.text, 90), askedTurn: int(x.askedTurn), doneTurn: int(x.doneTurn),
-    status: ["done", "waiting", "sent"].includes(x.status) ? x.status : "open", note: x.note ? clip(x.note, 50) : "" }));
+    status: STATUSES.includes(x.status) ? x.status : "open", note: x.note ? clip(x.note, 50) : "" }));
   const tops = (Array.isArray(o.topics) ? o.topics : []).filter(x => x && x.title).slice(0, 40).map(x => ({ title: clip(String(x.title).replace(/^["'*\s]+|["'*.\s]+$/g, ""), 60), startTurn: int(x.startTurn) ?? 0 }))
     .sort((a, b) => a.startTurn - b.startTurn);
   return { reqs, topics: tops };
 }
-function modelFam(m) { const x = /opus|sonnet|haiku|fable/i.exec(String(m || "")); return x ? x[0].toLowerCase() : null; }
 function modelName(m) {   // claude ids -> Haiku/Sonnet/Opus/Fable; free/local ids -> a readable name
   const f = modelFam(m); if (f) return f[0].toUpperCase() + f.slice(1);
   const t = String(m || "").split("/").pop().replace(/:free$|\.gguf$/i, "").replace(/[-_]+/g, " ").trim();
@@ -850,12 +896,14 @@ function reqsView(id) {
   const list = Array.isArray(m.reqs) ? m.reqs : [];
   const c = chatTurns(id, list.some(r => r.status === "done"));
   const items = list.map(r => ({ text: r.text, status: r.status, note: r.note || "", ...(r.status === "done" && c ? costOf(c, r) : {}) }));
-  const stale = !!c && (reqsFresh(m, c).some(t => isUser(t.user)) || needFix(m) || needTopics(m));
+  const stale = !!c && (reqsFresh(m, c).some(t => isAsk(t.user)) || needReview(m) || needTopics(m) || (Array.isArray(m.reqs) && m.reqsVer !== REQS_VER));
   // topics carry the turn's time and its place in the page's turn list (i), so tapping one scrolls there
   const topics = (Array.isArray(m.topics) ? m.topics : []).map(t => { const k = t.startTurn - (c?.base || 0); return { title: t.title, i: k, ts: c?.turns[k]?.ts || null }; });
   return { items, has: Array.isArray(m.reqs), busy: reqsRun.has(id), stale, err: !CLAUDE ? "unavailable" : m.reqsErr || null,
     topics, renamed: m.subjectBy === "user" ? m.subject : null };
 }
+// model family for the badge: "opus" | "sonnet" | "haiku" | "fable" | null, from an alias or a full model id
+function modelFam(m) { const x = /opus|sonnet|haiku|fable/i.exec(String(m || "")); return x ? x[0].toLowerCase() : null; }
 // ---------- background jobs (10/4) ----------
 // Long tasks an agent kicks off on this machine register themselves in ~/.claude/job-board
 // (helper: ~/.claude/bin/job). Every open chat on this machine shows them as a pulsing card

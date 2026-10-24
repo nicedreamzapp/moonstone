@@ -313,6 +313,16 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 #viewer .vnote{position:fixed;bottom:max(14px,env(safe-area-inset-bottom));left:0;right:0;text-align:center;color:var(--dim);font-size:12px}
 .compose .micb.again{width:auto;padding:0 10px;border-radius:999px;font-size:11px;white-space:nowrap}
 @media (max-width:700px){.compose .micb.again{width:34px;padding:0;border-radius:50%;font-size:15px}.compose .micb.again .lbl{display:none}}
+.c-chips{display:flex;flex-wrap:nowrap;gap:6px;padding:2px 4px;flex-shrink:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none}
+.c-chips::-webkit-scrollbar{display:none}
+.c-chips.none{display:none}
+.schip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap;cursor:pointer;color:color-mix(in srgb,var(--c) 70%,white);border:1px solid color-mix(in srgb,var(--c) 40%,transparent);background:rgba(255,255,255,.03)}
+.schip small{font-weight:400;opacity:.6;font-size:10.5px}
+.schip.cur{color:#fff;font-weight:600;background:color-mix(in srgb,var(--c) 45%,transparent);border-color:var(--c);box-shadow:0 0 10px color-mix(in srgb,var(--c) 50%,transparent)}
+.schip b{width:8px;height:8px;border-radius:50%;background:var(--need);box-shadow:0 0 0 3px rgba(255,171,61,.25),0 0 10px var(--need);animation:beat 1.2s infinite}
+.schip b.turn{background:#4aa8ff;box-shadow:0 0 0 3px rgba(74,168,255,.25),0 0 10px #4aa8ff}
+.schip b.ans{background:#4aa8ff;box-shadow:0 0 8px #4aa8ff;animation:none}
+.schip b.ok{width:7px;height:7px;background:var(--ok);box-shadow:0 0 6px var(--ok);animation:none}
 .u.chatmsg{align-self:flex-start;background:rgba(40,46,80,.55);border-style:dashed;font-size:13px;opacity:.92}
 .jobwrap{margin:0}
 .jobwrap>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;align-self:flex-end;margin-left:auto;padding:3px 10px;border-radius:999px;font-size:11px;color:#ffd08acc;background:rgba(20,16,8,.35);border:1px solid rgba(255,170,40,.25);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:.75}
@@ -512,6 +522,34 @@ function ctxHtml(d){
   return `<div class="ctxm${cls}" title="How full this chat's memory is. Near 100% it gets summarized and older detail is lost."><span class="bar"><i style="width:${Math.max(2,x.pct)}%"></i></span>memory ${x.pct}% · ${k(x.used)} of ${k(x.max)}</div>`;
 }
 function mdlPill(m){ return m ? `<span class="mdl ${esc(m)}" title="Model: ${esc(m)}">${esc(m[0].toUpperCase()+m.slice(1))}</span>` : ""; }
+// ---------- chat switcher ----------
+// Every open chat on every machine sits in a row under the header, coloured by machine, the one you're in lit and
+// kept in view, so switching is one tap instead of going back to the list. Order is fixed (machine, then id) so chips
+// never shuffle under a finger. Hidden when there is only one chat.
+const STOPW = new Set("the a an and or of on in for with to my your our at by from via is are be this that it its about into".split(" "));
+function shortName(t){   // a subject cut to 2-3 whole words, filler words dropped
+  const w = String(t||"").replace(/[—–:;,()"]/g," ").split(/\s+/).filter(Boolean).filter((x,i)=> i===0 || !STOPW.has(x.toLowerCase()));
+  const out = []; for(const x of w){ if(out.length >= 3 || (out.length >= 2 && (out.join(" ")+" "+x).length > 22)) break; out.push(x); }
+  return out.join(" ");
+}
+function chipsHtml(){
+  if(!S || !S.sessions || S.sessions.length < 2) return "";
+  const order = Object.fromEntries((S.machines||[]).map((m,i)=>[m.id,i]));
+  const list = [...S.sessions].sort((a,b)=>((order[a.machine]??99)-(order[b.machine]??99)) || (a.id<b.id?-1:a.id>b.id?1:0));
+  return list.map(s=>{
+    const nm = s.subject || s.title;
+    const mark = s.status==="needs" ? `<b title="Needs you"></b>` : s.status==="yourturn" ? `<b class="turn" title="Your turn"></b>` : s.status==="answered" && !safeNow(s) ? `<b class="ans" title="New answer"></b>` : safeNow(s) ? `<b class="ok" title="Safe to close"></b>` : "";
+    const full = `${nm || s.label || ""} · ${s.label||""} on the ${MN[s.machine]}`;
+    return `<button class="schip${s.id===openId?" cur":""}" style="--c:${MC[s.machine]}" data-open="${esc(s.id)}" title="${esc(full)}"><span class="sl">${esc(shortName(nm) || s.label || "chat")}</span><small>${esc(s.label||"")}</small>${mark}</button>`;
+  }).join("");
+}
+function chipsScroll(){ const row = $(".c-chips"), c = $(".schip.cur"); if(!row || !c) return; row.scrollLeft = Math.max(0, c.offsetLeft - row.offsetLeft - (row.clientWidth - c.offsetWidth)/2); }
+function chipsPaint(){ const el = $(".c-chips"); if(!el) return; const h = chipsHtml(); el.classList.toggle("none", !h); if(el.innerHTML !== h){ el.innerHTML = h; chipsScroll(); } }
+let stateAt = 0;
+async function stateTick(){   // the chat view only polls its own session; the chip row needs the whole list, at most every 2.5s
+  if(Date.now() - stateAt < 2500) return; stateAt = Date.now();
+  try{ const s = await api("/api/state"); learnMachines(s); S = s; if(openId && !pointerHeld && !holdStill()) chipsPaint(); }catch{}
+}
 // the pill under the memory meter: "Back to Claude" while a fallback model carries the chat, else "Fresh chat"
 // once the memory passes the server's threshold
 function freshHtml(d){
@@ -680,7 +718,7 @@ function renderConvo(keepScroll){
     { const m = $("#mic"); if(m){ m.className = "micb" + (v ? " "+v : ""); m.title = v==="live" ? "Tap to send" : "Tap to talk, tap again to send"; } }
     if(holdStill()){ clearTimeout(renderConvo.later); renderConvo.later = setTimeout(()=>{ if(pointerHeld){ refreshWanted = refreshWanted === null ? true : refreshWanted; return; } renderConvo(true); }, 600); return; }
     const ct = $(".c-top"); if(ct.innerHTML !== top) ct.innerHTML = top;
-    subjPaint(d);
+    subjPaint(d); chipsPaint();
     // redraw only the pieces that changed, so typing never waits on a full repaint of the conversation
     const pieces = turns ? turnHtml.concat([ask+notes+jobs]) : [body];
     const box = $(".msgs"); const kids = box.children;
@@ -699,6 +737,7 @@ function renderConvo(keepScroll){
   }
   $("#app").innerHTML = `<div class="convo" data-id="${esc(openId)}" style="--c:${c}">
     <div class="glass c-top">${top}</div>
+    <div class="c-chips${chipsHtml() ? "" : " none"}">${chipsHtml()}</div>
     <div class="glass c-subj" id="csubj"></div>
     <div class="glass msgs">${body}</div>${compose}</div>`;
   subjPaint(d);
@@ -760,7 +799,7 @@ async function refresh(keepScroll=true){
   if(openId){ const id = openId; if(!S){ S = await api("/api/state"); learnMachines(S); } const d = await api("/api/session/"+encodeURIComponent(id)); if(id !== openId) return; if(d.error){ openId=null; return refresh(); } D=d;
     if(d.fresh?.to && freshTap.has(id)){ freshTap.delete(id); return open(id.includes("~") ? id.split("~")[0]+"~"+d.fresh.to : d.fresh.to); }
     // a chat with something unread by the checklist: read it once on open, so the list and subjects fill without a tap
-    if(d.reqs?.stale && !d.reqs.busy && !d.reqs.err && !autoScan.has(id)){ autoScan.add(id); reqsRead(id); } if(pointerHeld) return later(); renderConvo(keepScroll); }
+    if(d.reqs?.stale && !d.reqs.busy && !d.reqs.err && !autoScan.has(id)){ autoScan.add(id); reqsRead(id); } if(pointerHeld) return later(); renderConvo(keepScroll); stateTick(); }
   else { const s = await api("/api/state"); if(openId) return; S = s; learnMachines(S); if(pointerHeld) return later(); renderList(); }
 }
 async function open(id){ reqOpen = null; topOpen = null; openId=id; history.replaceState(null,"","#"+encodeURIComponent(id)); micSync(); await refresh(false); }
@@ -1184,11 +1223,23 @@ function narrToggle(){
 
 // 10/20: YOUR TURN card buttons. Never a lock: the message box stays open and typing always wins.
 // Options come from an "Options: A | B | C" line in the answer, else Yes/No for a yes-or-no question.
+const OR_LEAD = /^(?:want|should|shall|do|does|did|would|could|can|will|is|are)\b.*?\b(?:me to|we|i|you|it|they|them|this|that|these|those|the \S+)\s+/i;
+function lastQ(txt){ const ps = String(txt||"").split(/\n\s*\n/).filter(p=>p.includes("?")); const m = (ps.pop()||"").replace(/\s+/g," ").match(/[^.!?]*\?(?=[^?]*$)/); return m ? m[0].trim() : ""; }
+function orOpts(q){
+  const lq = lastQ(q); if(/["“”`]/.test(lq)) return [];
+  const parts = lq.replace(/\?$/,"").split(/,?\s+or\s+/i); if(parts.length!==2) return [];
+  const a = parts[0].replace(OR_LEAD,"").trim(), b = parts[1].trim(), cap = x=>x.charAt(0).toUpperCase()+x.slice(1);
+  const ok = x => x && x.split(/\s+/).length<=6 && x.length<=40;
+  return ok(a) && ok(b) ? [cap(a), cap(b)] : [];
+}
 function quickAnswers(d){
   let txt = ""; for(const t of (d.turns||[]).slice().reverse()) if(t && typeof t.answer==="string" && t.answer.trim()){ txt = t.answer; break; }
   const m = txt.match(/^[ \t>*_]*(?:options|answers?)[*_]*:[*_]*\s*(.+)$/im);
   if(m){ const o = m[1].split(/\s*\|\s*/).map(x=>x.replace(/[*_`]/g,"").trim()).filter(x=>x && x.length<=40); if(o.length) return o.slice(0,5); }
   const q = (d.ask||"").replace(/^[^:]{0,30}:\s*/,"");
+  // an either-or question gets its two halves, never Yes/No: "Want it held until tonight, or started now?" ->
+  // ["Held until tonight", "Started now"]. Halves too long to guess: no buttons, just Type something.
+  if(/\bor\b[^?]*\?/i.test(q)) return orOpts(q);
   return /^(is|are|am|do|does|did|should|shall|can|could|will|would|want|was|were|has|have|ok)\b/i.test(q) ? ["Yes","No"] : [];
 }
 function qaTone(o){ return /^(yes|yep|looks good|go|approve|do it|send it|ok)\b/i.test(o) ? "go" : /^(no|nope|stop|don'?t|cancel|skip)\b/i.test(o) ? "stop" : ""; }

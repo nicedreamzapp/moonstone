@@ -32,6 +32,7 @@ try { CONFIG = { ...CONFIG, ...JSON.parse(fs.readFileSync(path.join(__dirname, "
 const CLAUDE = CONFIG.claude || CLAUDE_CANDIDATES.find(p => { try { fs.accessSync(p, WIN ? fs.constants.F_OK : fs.constants.X_OK); return true; } catch { return false; } });
 const STATE_FILE = path.join(__dirname, "state.json");
 const LAUNCHER_DIRS = [path.join(HOME, "Desktop", "Launchers"), path.join(HOME, "Desktop")];
+const UPLOADS = CONFIG.uploads ? String(CONFIG.uploads).replace(/^~/, HOME) : path.join(__dirname, "uploads");   // attached photos and files
 const RECENT_MS = 12 * 3600e3;
 const LIVE_MS = 90e3;
 
@@ -1869,6 +1870,24 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return res.end(fs.readFileSync(path.join(__dirname, "public", "index.html")));
     }
+    if (req.method === "GET" && parts[0] === "api" && parts[1] === "upload" && parts[2] && parts[3]) {
+      // tap a photo to see it full size: /api/upload/<machine>/<file> serves the original from that machine's uploads
+      const mach = decodeURIComponent(parts[2]), name = path.basename(decodeURIComponent(parts[3]));
+      if (mach !== CONFIG.machine) {
+        const peer = CONFIG.peers.find(p => p.id === mach); if (!peer?.url) { res.writeHead(404); return res.end("no such machine"); }
+        const u = new URL(peer.url);
+        const pr = http.request({ host: "127.0.0.1", port: u.port, path: "/api/upload/" + encodeURIComponent(mach) + "/" + encodeURIComponent(name), method: "GET", timeout: 60000, headers: { host: "127.0.0.1" } },
+          r => { res.writeHead(r.statusCode, { "content-type": r.headers["content-type"] || "application/octet-stream", "cache-control": "private, max-age=86400" }); r.pipe(res); });
+        pr.on("timeout", () => pr.destroy(new Error("timeout")));
+        pr.on("error", () => { if (!res.headersSent) { res.writeHead(502); res.end("the " + peer.name + " isn't answering"); } });
+        return pr.end();
+      }
+      const file = path.join(UPLOADS, name);
+      let buf; try { buf = fs.readFileSync(file); } catch { res.writeHead(404); return res.end("not found"); }
+      const ext = path.extname(name).toLowerCase();
+      const type = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp", ".heic": "image/heic", ".pdf": "application/pdf" }[ext] || "application/octet-stream";
+      res.writeHead(200, { "content-type": type, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" }); return res.end(buf);
+    }
     if (req.method === "GET" && url.pathname === "/api/local") return json(res, 200, localState());
     if (req.method === "GET" && url.pathname === "/api/usage") return json(res, 200, (await claudeUsage(url.searchParams.get("peer") === "1")) || { none: true });
     if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, await buildState());
@@ -1880,7 +1899,8 @@ const server = http.createServer(async (req, res) => {
     const peerOf = id => { const i = id ? id.indexOf("~") : -1; return i > 0 ? CONFIG.peers.find(p => p.id === id.slice(0, i)) : null; };
     if (pid && peerOf(pid)) {
       const peer = peerOf(pid); const rest = "/" + parts.slice(0, 2).join("/") + "/" + encodeURIComponent(pid.slice(peer.id.length + 1)) + (parts[3] ? "/" + parts.slice(3).join("/") : "");
-      const r = await peerFetch(peer, req.method, rest, req.method === "POST" ? await body(req) : null).catch(e => ({ code: 502, body: { error: "the " + peer.name + " isn't answering" } }));
+      const att = parts[3] === "attach";   // a photo/file is big and slow to carry over the tunnel
+      const r = await peerFetch(peer, req.method, rest, req.method === "POST" ? await body(req, att ? 40e6 : 1e6) : null, att ? 60000 : 4000).catch(e => ({ code: 502, body: { error: "the " + peer.name + " isn't answering" } }));
       if (r.body && typeof r.body === "object" && r.code === 200 && req.method === "GET") { r.body.id = pid; r.body.machine = peer.id; }
       if (r.body && typeof r.body === "object" && r.code === 200 && req.method === "POST" && r.body.id) r.body.id = peer.id + "~" + r.body.id;
       return json(res, r.code, r.body);
@@ -1911,6 +1931,36 @@ const server = http.createServer(async (req, res) => {
       const d = sessionDetail(decodeURIComponent(parts[2])); if (d) d.machine = CONFIG.machine;
       return d ? json(res, 200, d) : json(res, 404, { error: "not found" });
     }
+    // Drag a file, folder or app onto the window and its full path lands in the box, the way a terminal does it.
+    // A web page never learns a dropped item's real path, only its name, size and modified time, so find it here
+    // with Spotlight (macOS) and match on those, then look in the usual folders by hand.
+    if (req.method === "POST" && url.pathname === "/api/resolve-path") {
+      if (req.headers["x-dock"] !== "1") { res.writeHead(403); return res.end("missing header"); }
+      const b = await body(req); const items = Array.isArray(b.items) ? b.items.slice(0, 20) : [];
+      const find = it => new Promise(done => {
+        const name = path.basename(String(it.name || "")).replace(/'/g, "");
+        if (!name) return done(null);
+        const pick = list => {
+          const stats = list.map(f => { try { const st = fs.statSync(f); return { f, st }; } catch { return null; } }).filter(Boolean);
+          const close = x => !it.mtime || Math.abs(x.st.mtimeMs - it.mtime) < 2500;
+          const same = x => it.dir ? x.st.isDirectory() : (x.st.isFile() && (!it.size || x.st.size === it.size));
+          const good = stats.filter(x => same(x) && close(x));
+          const pool = good.length ? good : stats.filter(same);
+          pool.sort((x, y) => y.st.mtimeMs - x.st.mtimeMs);
+          return pool.length ? pool[0].f : null;
+        };
+        const byHand = () => execFile(WIN ? "where" : "/usr/bin/find", WIN ? ["/r", HOME, name] : [path.join(HOME, "Desktop"), path.join(HOME, "Downloads"), path.join(HOME, "Documents"), "/Applications", "-maxdepth", "5", "-name", name], { timeout: 10000, maxBuffer: 4e6, windowsHide: true },
+          (e2, out2) => done(pick(String(out2 || "").split(/\r?\n/).filter(Boolean))));
+        if (process.platform !== "darwin") return byHand();
+        execFile("/usr/bin/mdfind", ["-onlyin", HOME, "-onlyin", "/Applications", `kMDItemFSName == '${name}'`], { timeout: 8000, maxBuffer: 4e6 }, (e, out) => {
+          const hit = pick(String(out || "").split("\n").filter(Boolean));
+          if (hit) return done(hit);
+          byHand();   // Spotlight skips some folders
+        });
+      });
+      const paths = await Promise.all(items.map(find));
+      return json(res, 200, { paths });
+    }
     if (req.method === "GET" && url.pathname === "/api/narrator") return json(res, 200, narrOwner);
     if (req.method === "GET" && url.pathname === "/api/events") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
@@ -1926,7 +1976,17 @@ const server = http.createServer(async (req, res) => {
         try { return json(res, 200, { text: await transcribe(buf), ms: Date.now() - t0 }); }
         catch (e) { return json(res, 503, { error: String(e.message || e) }); }
       }
-      const b = req.parsedBody || await body(req);
+      const b = req.parsedBody || await body(req, parts[3] === "attach" ? 40e6 : 1e6);
+      if (parts[1] === "session" && parts[3] === "attach") {   // the + button: a photo or file from the page lands on the machine running this chat
+        const buf = Buffer.from(String(b.data || ""), "base64");
+        if (!buf.length) return json(res, 400, { error: "that file came through empty" });
+        fs.mkdirSync(UPLOADS, { recursive: true });
+        const d0 = new Date(), z = n => String(n).padStart(2, "0");
+        const stamp = `${d0.getFullYear()}${z(d0.getMonth() + 1)}${z(d0.getDate())}-${z(d0.getHours())}${z(d0.getMinutes())}${z(d0.getSeconds())}`;
+        const name = String(b.name || "file").replace(/[^\w.\-]+/g, "_").slice(-80) || "file";
+        const file = path.join(UPLOADS, stamp + "-" + name); fs.writeFileSync(file, buf);
+        return json(res, 200, { path: file, bytes: buf.length });
+      }
       if (url.pathname === "/api/dictate") {   // mic button: flip the computer's own dictation (Mac Edit menu helper / Windows Win+H)
         if (req.headers["x-via-proxy"]) return json(res, 409, { error: "not at this machine" });   // the keys would land on the wrong screen
         const d = CONFIG.dictate || {};

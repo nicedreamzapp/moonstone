@@ -224,7 +224,7 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .a p{margin:0 0 8px}.a p:last-child{margin:0}
 .a ul,.a ol{margin:0 0 8px;padding-left:20px}
 .a code{font-family:var(--mono);font-size:12px;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:5px}
-.a pre{font-family:var(--mono);font-size:11.5px;background:rgba(0,0,0,.35);border:1px solid var(--rim2);border-radius:10px;padding:10px;overflow-x:auto;white-space:pre}
+.a pre{font-family:var(--mono);font-size:11.5px;background:rgba(0,0,0,.35);border:1px solid var(--rim2);border-radius:10px;padding:10px;overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere}
 .a pre code{background:none;padding:0}
 .a a{color:#9fd0ff}
 .a h1,.a h2,.a h3{font-size:14px;margin:4px 0 6px}
@@ -298,6 +298,21 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .fbback,.freshp{font:inherit;font-size:11px;line-height:1.3;cursor:pointer;padding:3px 11px;border-radius:999px;color:#bfe9d3;background:rgba(127,209,168,.12);border:1px solid rgba(127,209,168,.35);max-width:100%;white-space:nowrap}
 .fbback{display:block;align-self:flex-start;width:fit-content;margin-top:8px}
 .freshp{align-self:flex-end;order:10;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)} .freshp[disabled]{opacity:.6;cursor:default}
+.micb.att svg{width:16px;height:16px}
+.attrow{display:flex;gap:8px;padding:8px 8px 0;flex-wrap:wrap}
+.attrow .th{position:relative;width:64px;height:64px;border-radius:12px;overflow:hidden;border:1px solid var(--rim);background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--dim);text-align:center;padding:2px}
+.attrow .th img{width:100%;height:100%;object-fit:cover;cursor:zoom-in}
+.attrow .th button{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:13px;line-height:20px;padding:0}
+.u img.uimg{display:block;max-width:220px;max-height:260px;border-radius:10px;margin:4px 0;cursor:zoom-in}
+.u .uchip{display:inline-block;padding:2px 8px;border-radius:8px;background:rgba(0,0,0,.25);font-size:12px;margin:2px 0}
+#viewer{position:fixed;inset:0;z-index:50;background:rgba(5,6,14,.94);display:flex;align-items:center;justify-content:center;overflow:auto;-webkit-overflow-scrolling:touch}
+#viewer img{max-width:100vw;max-height:100vh;object-fit:contain}
+#viewer.big{align-items:flex-start;justify-content:flex-start}
+#viewer.big img{max-width:none;max-height:none}
+#viewer .vx{position:fixed;top:max(12px,env(safe-area-inset-top));right:12px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;font-size:22px;line-height:40px;padding:0;z-index:51}
+#viewer .vnote{position:fixed;bottom:max(14px,env(safe-area-inset-bottom));left:0;right:0;text-align:center;color:var(--dim);font-size:12px}
+.compose .micb.again{width:auto;padding:0 10px;border-radius:999px;font-size:11px;white-space:nowrap}
+@media (max-width:700px){.compose .micb.again{width:34px;padding:0;border-radius:50%;font-size:15px}.compose .micb.again .lbl{display:none}}
 .u.chatmsg{align-self:flex-start;background:rgba(40,46,80,.55);border-style:dashed;font-size:13px;opacity:.92}
 .jobwrap{margin:0}
 .jobwrap>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;align-self:flex-end;margin-left:auto;padding:3px 10px;border-radius:999px;font-size:11px;color:#ffd08acc;background:rgba(20,16,8,.35);border:1px solid rgba(255,170,40,.25);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:.75}
@@ -623,7 +638,7 @@ function renderConvo(keepScroll){
   for(let j=pend.length-1;j>=0;j--) if(Date.now()-pend[j].at > 120000 || d.turns.slice(-6).some(t=>t.user && t.user.trim()===pend[j].text)) pend.splice(j,1);
   const turnHtml = d.turns.map((t,i)=>{
     // a message another chat sent with chat-send: shown apart, on the left, without the delivery note
-    let h = t.user ? (/^\[Chat message, NOT from [^\]]*\]/.test(t.user) ? `<div class="u chatmsg">${esc(t.user.replace(/\n\n\(Moonstone delivered this[\s\S]*$/, ""))}</div>` : `<div class="u">${esc(t.user)}</div>`) : "";
+    let h = t.user ? (/^\[Chat message, NOT from [^\]]*\]/.test(t.user) ? `<div class="u chatmsg">${uHtml(t.user.replace(/\n\n\(Moonstone delivered this[\s\S]*$/, ""))}</div>` : `<div class="u">${uHtml(t.user)}</div>`) : "";
     if(t.open){
       const lastStep = [...t.work].reverse().find(w=>w.k==="tool");
       // show what it has written so far (Claude's lines between tools, a local model's streaming text);
@@ -635,7 +650,7 @@ function renderConvo(keepScroll){
     }
     if(t.banner) h += `<button class="fbback" data-fbback="1" title="Stop the fallback model and send your next message to Claude">Back to Claude</button>`;
     return `<div class="ti" data-ti="${t.i}" style="display:contents">${h}</div>`;   // topics scroll to their turn
-  }).concat(pend.map(x=>`<div class="u">${esc(x.text)}</div>`));
+  }).concat(pend.map(x=>`<div class="u">${uHtml(x.text)}</div>`));
   const turns = turnHtml.join("");
   let ask = "";
   if(d.perm){
@@ -647,7 +662,9 @@ function renderConvo(keepScroll){
 "";
   const v = micUi.cls;
   const mic = `<button class="micb${v?" "+v:""}" id="mic" title="${v==="live"?"Tap to send":"Tap to talk, tap again to send"}">${MIC_SVG}</button>`;
-  const compose = `<div class="glass compose" style="--c:${c}"><textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}<button class="send" id="send">Send</button></div>`;
+  const att = `<button class="micb att" id="att" title="Attach a photo or file">${PLUS_SVG}</button>`;
+  const again = `<button class="micb again" id="again" title="Hear the last answer again">↻<span class="lbl"> Hear again</span></button>`;
+  const compose = `<div class="glass compose" style="--c:${c}">${att}<textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}${again}<button class="send" id="send">Send</button></div>`;
   const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>${d.kind==="dock"?`<button class="ghost" id="close" title="End this session">End</button>`:""}`;
   const jobs = (d.ask && !d.busy && !d.perm ? `<div class="yourturn"><b>YOUR TURN</b><div class="tq">${esc(d.ask)}</div><div class="qr">${quickAnswers(d).map(o=>`<button class="qa ${qaTone(o)}" data-quick="${esc(o)}">${esc(o)}</button>`).join("")}<button class="qa type" data-type="1">Type something</button></div></div>` : "") + jobsHtml(d);
   turnTitle(!!(d.ask && !d.busy && !d.perm));
@@ -677,7 +694,7 @@ function renderConvo(keepScroll){
     curTa.readOnly = !!v && !osDict;
     if(curTa.value !== (drafts[openId]||"") && v && !osDict) { curTa.value = drafts[openId]||""; autosize(curTa); }
     if(changed){ const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev; }
-    narrCheck(d);
+    attStrip(); narrCheck(d);
     return;
   }
   $("#app").innerHTML = `<div class="convo" data-id="${esc(openId)}" style="--c:${c}">
@@ -687,7 +704,7 @@ function renderConvo(keepScroll){
   subjPaint(d);
   const nb = $(".msgs"); nb.scrollTop = atBottom||!keepScroll ? nb.scrollHeight : prev;
   const t2 = $("#ta"); if(t2){ autosize(t2); if(document.activeElement===document.body) t2.focus(); t2.setSelectionRange(t2.value.length,t2.value.length); }
-  narrCheck(d);
+  attStrip(); narrCheck(d);
 }
 let lastCtrl = 0, lastDictTap = 0;
 document.addEventListener("keydown", e=>{ if(e.key === "Control") lastCtrl = Date.now(); }, true);
@@ -794,6 +811,8 @@ document.addEventListener("click", async e=>{
   if((reqOpen || topOpen) && !t.closest(".sj-drop,.sj-side")){ reqOpen = null; topOpen = null; if(D) subjPaint(D); }
   if(t.closest("#back")) return back();
   if(t.closest("#narr")) return narrToggle();
+  if(t.closest("#again")) return narrAgain();
+  if(t.closest("#att")) return attPick();
   if(t.closest("[data-fbback]")){ const r = await api(`/api/session/${encodeURIComponent(openId)}/claude`,{}); toast(r.ok ? "Back on Claude. Your next message goes to Claude." : (r.error || "Couldn't switch")); return refresh(); }
   if(t.closest("[data-fresh]")){ const id = openId; const r = await api(`/api/session/${encodeURIComponent(id)}/fresh`,{}); if(r.ok){ freshTap.add(id); toast("Writing a handoff note, then opening a fresh chat"); } else toast(r.error || "Couldn't start it"); return refresh(); }
   if(t.closest("#send")){ if(rec){ if(rec.state === "recording") rec.stop(); return; } if(micUi.cls) return; return sendMsg(); }
@@ -806,6 +825,122 @@ document.addEventListener("click", async e=>{
   const qk = t.closest("[data-quick]"); if(qk){ const ta=$("#ta"); if(ta.value.trim()) return ta.focus(); ta.value = qk.dataset.quick; return sendMsg(); }
   const q = t.closest("[data-answer]"); if(q){ await api(`/api/session/${openId}/perm`,{request_id:D.perm.request_id, allow:false, answer:q.dataset.answer}); return refresh(); }
 });
+// ---------- attachments ----------
+// The + button: pick photos or files, they're saved on the machine running this chat (config "uploads", default
+// ./uploads), and the chat gets a line with each file's path so it can open and look at it. Big photos are shrunk to
+// 2048px first (fast from a phone). Drop or paste a picture anywhere on the window and it attaches the same way.
+const PLUS_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`;
+const attIn = Object.assign(document.createElement("input"), {type:"file", multiple:true, hidden:true});
+document.body.appendChild(attIn);
+function attPick(){ if(!openId) return toast("Open a session first, then tap +"); attIn.value = ""; attIn.click(); }
+const toB64 = blob => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = bad; r.readAsDataURL(blob); });
+async function shrink(f){
+  if(!/^image\/(jpe?g|png|heic|heif|webp)$/i.test(f.type) || f.size < 1.5e6) return f;
+  try {
+    const url = URL.createObjectURL(f); const img = new Image(); img.src = url; await img.decode(); URL.revokeObjectURL(url);
+    const k = Math.min(1, 2048 / Math.max(img.naturalWidth, img.naturalHeight));
+    const cv = Object.assign(document.createElement("canvas"), {width: Math.round(img.naturalWidth*k), height: Math.round(img.naturalHeight*k)});
+    cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+    const out = await new Promise(ok => cv.toBlob(ok, "image/jpeg", 0.88));
+    return out ? new File([out], f.name.replace(/\.\w+$/, "") + ".jpg", {type:"image/jpeg"}) : f;
+  } catch { return f; }
+}
+attIn.addEventListener("change", () => attachFiles([...attIn.files]));
+addEventListener("dragover", e => { if([...(e.dataTransfer?.types||[])].includes("Files")){ e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+// Pictures attach so the model can see them; anything else (a file, a folder, an .app) drops its full path into the
+// box, the way a terminal does. A page only knows a dropped item's name, size and date, so the machine finds the real
+// path (/api/resolve-path, macOS Spotlight).
+addEventListener("drop", e => { const fs = [...(e.dataTransfer?.files||[])]; if(!fs.length) return; e.preventDefault();
+  if(!openId) return toast("Open a session first, then drop it");
+  const entries = [...(e.dataTransfer.items||[])].map(i => i.webkitGetAsEntry ? i.webkitGetAsEntry() : null);
+  const pics = [], rest = [];
+  fs.forEach((f, i) => { const en = entries[i]; const dir = !!(en && en.isDirectory);
+    if(!dir && /^image\//.test(f.type)) pics.push(f); else rest.push({ f, en, dir }); });
+  if(pics.length) attachFiles(pics);
+  if(rest.length) dropPaths(rest); });
+async function dropPaths(rest){
+  const meta = en => new Promise(ok => { try { en.getMetadata(m => ok(m.modificationTime ? +m.modificationTime : 0), () => ok(0)); } catch { ok(0); } });
+  const items = await Promise.all(rest.map(async x => ({ name: x.f.name, dir: x.dir, size: x.dir ? 0 : x.f.size,
+    mtime: x.dir ? (x.en ? await meta(x.en) : 0) : x.f.lastModified })));
+  let r = {}; try { r = await api("/api/resolve-path", { items }); } catch {}
+  const got = (r.paths || []).map(p => p || null);
+  const missing = items.filter((_, i) => !got[i]).map(x => x.name);
+  const text = got.filter(Boolean).map(p => /\s/.test(p) ? `"${p}"` : p).join(" ");
+  if(text){ const ta = $("#ta"); const at = ta.selectionStart ?? ta.value.length;
+    const pre = ta.value.slice(0, at), post = ta.value.slice(at);
+    const pad = pre && !/\s$/.test(pre) ? " " : "";
+    ta.value = pre + pad + text + (post && !/^\s/.test(post) ? " " : "") + post;
+    ta.focus(); ta.dispatchEvent(new Event("input", { bubbles: true })); }
+  if(missing.length) toast(`Couldn't find where ${missing.join(", ")} lives on this machine`);
+}
+addEventListener("paste", e => { const fs = [...(e.clipboardData?.files||[])]; if(!fs.length || !openId) return; e.preventDefault(); attachFiles(fs); });
+async function attachFiles(files){
+  const sendTo = openId; if(!sendTo || !files.length) return;
+  for(const f0 of files){
+    if(f0.size > 28e6){ toast(`${f0.name} is too big (over 28 MB)`); continue; }
+    toast(`Attaching ${f0.name}…`);
+    try {
+      const f = await shrink(f0);
+      const r = await api(`/api/session/${encodeURIComponent(sendTo)}/attach`, {name: f.name, data: await toB64(f)});
+      if(!r.path){ toast(r.error || "Couldn't attach that"); continue; }
+      if(/^image\//.test(f.type)) thumbPut(r.path, await makeThumb(f));
+      (pendAtt[sendTo] = pendAtt[sendTo] || []).push(r.path); savePend(); attStrip();
+      toast("Attached, now say or type what you want and Send");
+    } catch { toast("Couldn't attach that"); }
+  }
+}
+// Attached files wait as thumbnails above the box (not as text in it) and ride along when you send.
+// Pictures show in your message bubble from a small copy kept on this device. A device without that copy
+// loads the picture once from the machine it was saved on, then keeps its own small copy.
+const pendAtt = (()=>{ try { return JSON.parse(sessionStorage.getItem("moonstone.att")||"{}"); } catch { return {}; } })();
+const savePend = () => { try { sessionStorage.setItem("moonstone.att", JSON.stringify(pendAtt)); } catch {} };
+const thumbs = (()=>{ try { return JSON.parse(localStorage.getItem("moonstone.thumbs")||"{}"); } catch { return {}; } })();
+function thumbPut(p, d){ if(!d) return; thumbs[p] = d; const k = Object.keys(thumbs); while(k.length > 40) delete thumbs[k.shift()];
+  try { localStorage.setItem("moonstone.thumbs", JSON.stringify(thumbs)); } catch { delete thumbs[p]; } }
+async function makeThumb(f){ try {
+  const url = URL.createObjectURL(f); const img = new Image(); img.src = url; await img.decode(); URL.revokeObjectURL(url);
+  const k = Math.min(1, 480 / Math.max(img.naturalWidth, img.naturalHeight));
+  const cv = Object.assign(document.createElement("canvas"), {width: Math.round(img.naturalWidth*k), height: Math.round(img.naturalHeight*k)});
+  cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height); return cv.toDataURL("image/jpeg", 0.75); } catch { return null; } }
+const ATT_RE = /\[attached file: ([^\]]+)\]/g;
+function uHtml(t){ return esc(t).replace(ATT_RE, (m, p) => { const raw = p.replace(/&amp;/g,"&");
+  return thumbs[raw] ? `<img class="uimg" data-full="${esc(raw)}" src="${thumbs[raw]}" alt="">`
+    : /\.(jpe?g|png|gif|webp|heic)$/i.test(raw) ? `<img class="uimg" data-full="${esc(raw)}" data-remote="1" loading="lazy" src="${esc(upUrl(raw))}" alt="">`
+    : `<span class="uchip">📎 ${esc(raw.split(/[\\/]/).pop().replace(/^\d{8}-\d{6}-/, ""))}</span>`; })
+  .replace(/(<\/?(?:img|span)[^>]*>)\n|\n(?=<(?:img|span) )/g, "$1"); }
+function attStrip(){
+  const cv = $(".convo"); if(!cv) return; let row = $("#attrow"); const list = pendAtt[openId] || [];
+  if(!list.length){ if(row) row.remove(); return; }
+  if(!row){ row = document.createElement("div"); row.id = "attrow"; row.className = "attrow"; cv.querySelector(".compose").prepend(row); }
+  const h = list.map((p,i)=>`<div class="th">${thumbs[p]?`<img data-full="${esc(p)}" src="${thumbs[p]}" alt="">`:esc(p.split(/[\\/]/).pop().replace(/^\d{8}-\d{6}-/, ""))}<button data-unatt="${i}" title="Remove">×</button></div>`).join("");
+  if(row.__h !== h){ row.innerHTML = h; row.__h = h; }
+}
+function upMach(){ return (D && D.machine) || (openId && openId.includes("~") ? openId.split("~")[0] : (S && S.machines && S.machines[0] && S.machines[0].id) || "local"); }
+function upUrl(p){ return BASE + "api/upload/" + encodeURIComponent(upMach()) + "/" + encodeURIComponent(p.split(/[\\/]/).pop()); }
+// a picture fetched from the machine: keep a small copy here so it loads instantly next time; if it can't load, show the name
+document.addEventListener("load", e => { const im = e.target; if(!(im instanceof HTMLImageElement) || !im.dataset.remote || thumbs[im.dataset.full]) return;
+  try { const k = Math.min(1, 480 / Math.max(im.naturalWidth, im.naturalHeight));
+    const cv = Object.assign(document.createElement("canvas"), {width: Math.round(im.naturalWidth*k), height: Math.round(im.naturalHeight*k)});
+    cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height); thumbPut(im.dataset.full, cv.toDataURL("image/jpeg", 0.75)); } catch {} }, true);
+document.addEventListener("error", e => { const im = e.target; if(!(im instanceof HTMLImageElement) || !im.dataset.remote) return;
+  const c = document.createElement("span"); c.className = "uchip"; c.textContent = "📎 " + im.dataset.full.split(/[\\/]/).pop().replace(/^\d{8}-\d{6}-/, ""); im.replaceWith(c); }, true);
+// Tap a picture: the original from the machine it was saved on, full sharpness. Shows the small copy instantly and
+// swaps in the original when it arrives. Tap the picture to see it at full size, × or tap outside to close.
+function viewFull(p, small){
+  const name = p.split(/[\\/]/).pop(), mach = upMach();
+  const v = document.createElement("div"); v.id = "viewer";
+  v.innerHTML = `<button class="vx" title="Close">×</button><img alt=""><div class="vnote">Loading the full picture…</div>`;
+  const img = v.querySelector("img"); img.src = small || "";
+  const full = new Image(); full.onload = () => { img.src = full.src; v.querySelector(".vnote").textContent = "Tap the picture to zoom"; };
+  full.onerror = () => { v.querySelector(".vnote").textContent = "Couldn't load the original, showing the small copy"; };
+  full.src = BASE + "api/upload/" + encodeURIComponent(mach) + "/" + encodeURIComponent(name);
+  v.addEventListener("click", e => { if(e.target === img) return v.classList.toggle("big"); v.remove(); });
+  document.body.appendChild(v);
+}
+document.addEventListener("click", e => { const im = e.target.closest && e.target.closest("img[data-full]"); if(im){ e.preventDefault(); viewFull(im.dataset.full, im.src); } }, true);
+document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-unatt]"); if(!b) return;
+  (pendAtt[openId]||[]).splice(+b.dataset.unatt, 1); savePend(); attStrip(); });
+
 // ---------- push to talk ----------
 // Tap the mic, say it, tap again. The clip is transcribed by whisper on the machine serving
 // this page and goes straight into the open session. Nothing leaves your machines.
@@ -1032,6 +1167,13 @@ async function narrSay(md, local){
 }
 function micLive(){ return !!(osDict || sr || rec) || micUi.cls === "live"; }
 function narrHush(){ narrGen++; narrQ = []; if(narrAudio){ try { narrAudio.pause(); } catch {} narrAudio = null; } }
+// missed the answer? one tap reads the last finished one again, from the top
+function narrAgain(){
+  const t = D && D.turns ? [...D.turns].reverse().find(x => x.answer && !x.open) : null;   // works mid-turn too: the last finished one
+  if(!t) return toast("No answer to play yet"); narrHush();
+  fetch(BASE+"api/narrator",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({id:WIN_ID})}).catch(()=>{}).finally(() =>
+    narrSay(t.answer, D.local || /gemma|qwen|heretic|muse|local/i.test(D.label||"")));
+}
 function narrToggle(){
   narrOn = !narrOn; try { localStorage.setItem("moonstone.narr", narrOn?"1":"0"); } catch {}
   if(!narrOn) narrHush();
@@ -1051,7 +1193,9 @@ function quickAnswers(d){
 }
 function qaTone(o){ return /^(yes|yep|looks good|go|approve|do it|send it|ok)\b/i.test(o) ? "go" : /^(no|nope|stop|don'?t|cancel|skip)\b/i.test(o) ? "stop" : ""; }
 async function sendMsg(){
-  const ta=$("#ta"); const text=ta.value.trim(); if(!text) return;
+  const ta=$("#ta"); const att = (pendAtt[openId]||[]).map(p => `[attached file: ${p}]`).join("\n");
+  const text = [ta.value.trim(), att].filter(Boolean).join("\n"); if(!text) return;
+  pendAtt[openId] = []; savePend(); attStrip();
   ta.value=""; drafts[openId]=""; autosize(ta);
   lastDictTap = lastCtrl = lastKey = 0;                                // you're done talking: show it now, no holding still
   (pendingSent[openId] = pendingSent[openId] || []).push({text, at: Date.now()}); saveDrafts();

@@ -278,6 +278,7 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* background work folds into one small "● 2 working" pill; tap it for the full cards */
+.u.chatmsg{align-self:flex-start;background:rgba(40,46,80,.55);border-style:dashed;font-size:13px;opacity:.92}
 .jobwrap{margin:0}
 .jobwrap>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;align-self:flex-end;margin-left:auto;padding:3px 10px;border-radius:999px;font-size:11px;color:#ffd08acc;background:rgba(20,16,8,.35);border:1px solid rgba(255,170,40,.25);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:.75}
 .jobwrap>summary::-webkit-details-marker{display:none}
@@ -560,7 +561,8 @@ function renderConvo(keepScroll){
   const pend = pendingSent[openId] || [];
   for(let j=pend.length-1;j>=0;j--) if(Date.now()-pend[j].at > 120000 || d.turns.slice(-6).some(t=>t.user && t.user.trim()===pend[j].text)) pend.splice(j,1);
   const turnHtml = d.turns.map((t,i)=>{
-    let h = t.user ? `<div class="u">${esc(t.user)}</div>` : "";
+    // a message another chat sent with chat-send: shown apart, on the left, without the delivery note
+    let h = t.user ? (/^\[Chat message, NOT from [^\]]*\]/.test(t.user) ? `<div class="u chatmsg">${esc(t.user.replace(/\n\n\(Moonstone delivered this[\s\S]*$/, ""))}</div>` : `<div class="u">${esc(t.user)}</div>`) : "";
     if(t.open){
       const lastStep = [...t.work].reverse().find(w=>w.k==="tool");
       // show what it has written so far (Claude's lines between tools, a local model's streaming text);
@@ -1003,7 +1005,13 @@ document.addEventListener("keydown", e=>{
   }
   if(e.key==="Escape" && openId) back();
 });
-document.addEventListener("input", e=>{ if(e.target.id==="ta"){ autosize(e.target); drafts[openId]=e.target.value; saveDrafts(); lastKey=Date.now(); } });
+document.addEventListener("input", e=>{ if(e.target.id==="ta"){ autosize(e.target); drafts[openId]=e.target.value; saveDrafts(); lastKey=Date.now(); typingPing(); } });
+// while you are typing in a chat, tell the server, so a message from another chat never wakes it under your words
+let typingSent = {id:null, at:0};
+function typingPing(){ const ta=$("#ta"); if(!openId || !ta || !ta.value.trim()) return;
+  if(typingSent.id===openId && Date.now()-typingSent.at < 8000) return; typingSent = {id:openId, at:Date.now()};
+  api(`/api/session/${encodeURIComponent(openId)}/typing`, {}).catch(()=>{}); }
+setInterval(()=>{ if(!document.hidden && document.hasFocus() && Date.now()-lastKey < 120000) typingPing(); }, 10000);
 
 let pending=false, stale=false;
 // a hidden tab doesn't refetch; it catches up the moment you look at it

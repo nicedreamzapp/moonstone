@@ -9,3 +9,9 @@ mac/dictate
 bg-history.json
 chat-mail.json
 uploads/
+update.log
+update.skip
+update.hold
+.server.next.js
+*.bak*
+*.prev

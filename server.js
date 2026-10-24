@@ -911,7 +911,7 @@ function refineSubject(id, text) {   // once per chat: "auto" -> "ai" (Haiku's) 
     saveState(); broadcast(id);
   });
 }
-function subjectFor(id) {   // what the chat is about NOW: his rename, else the latest topic, else the opening subject
+function subjectFor(id) {   // what the chat is about NOW: a rename, else the latest topic, else the opening subject
   const m = metaOf(id); if (!m) return null;
   const topic = Array.isArray(m.topics) && m.topics.length ? m.topics[m.topics.length - 1].title : null;
   if (m.subjectBy === "user" && m.subject) return m.subject;
@@ -1409,7 +1409,34 @@ function broadcast(id) {
   bTimer = setTimeout(() => { bTimer = null; for (const c of clients) c.write(`data: ${JSON.stringify({ t: Date.now(), v: pageVersion(), focus: c.local ? lastFocus : undefined })}\n\n`); }, 250);
 }
 // the page reloads itself when index.html changes, so design tweaks show up without a click
-const pageVersion = () => { try { return Math.round(fs.statSync(path.join(__dirname, "public", "index.html")).mtimeMs); } catch { return 0; } };
+// page version = a hash of the page's CONTENT, so every machine running the same page reports the same version
+// and a re-copied but unchanged file does not reload anybody's window
+let pvAt = 0, pvMt = -1, pvHash = "0";
+const pageVersion = () => {
+  if (Date.now() - pvAt < 1000) return pvHash; pvAt = Date.now();
+  try { const f = path.join(__dirname, "public", "index.html"), mt = fs.statSync(f).mtimeMs;
+    if (mt !== pvMt) { pvMt = mt; pvHash = crypto.createHash("sha1").update(fs.readFileSync(f)).digest("hex").slice(0, 12); } } catch {}
+  return pvHash;
+};
+const SERVER_V = (() => { try { return crypto.createHash("sha1").update(fs.readFileSync(__filename)).digest("hex").slice(0, 12); } catch { return "?"; } })();
+// last time someone did something on this server (sent, launched, dictated, typed): the updater waits for quiet.
+// Only real chat actions count; peers polling each other must not keep it from ever going quiet.
+let lastPost = 0;
+const ACTIVE_POSTS = new Set(["/api/launch", "/api/continue", "/api/stt", "/api/dictate", "/api/chat/send"]);
+const ACTIVE_SESSION = new Set(["send", "attach", "stop", "perm", "fresh", "reopen", "close", "claude", "subject", "typing"]);
+const isActivity = (p, parts) => ACTIVE_POSTS.has(p) || (parts[0] === "api" && parts[1] === "session" && ACTIVE_SESSION.has(parts[3]));
+// what updater.js asks before it restarts this server: is anything working that a restart would kill?
+function idleReport() {
+  let busy = 0, bg = 0;
+  for (const [id, p] of procs) {
+    if (p.child && p.child.exitCode !== null) continue;
+    if (p.busy || p.perm) busy++;
+    const s = state.sessions.find(x => x.id === id);
+    if (s?.sessionId && !p.pipe) { const tp = findTranscript(s.sessionId); if (tp) bg += bgTasks(tp).length; }
+  }
+  return { machine: CONFIG.machine, page: pageVersion(), server: SERVER_V, busy, bg, quietSecs: Math.round((Date.now() - lastPost) / 1000),
+    windows: [...clients].length, up: Math.round(process.uptime()) };
+}
 let lastPage = pageVersion();
 setInterval(() => { const v = pageVersion(); if (v !== lastPage) { lastPage = v; broadcast(); } }, 2000);
 // transcripts change without us knowing; watch only the ones on screen (live terminals + dock
@@ -1856,6 +1883,15 @@ const server = http.createServer(async (req, res) => {
   if (!["127.0.0.1", "localhost"].includes(host)) { res.writeHead(403); return res.end("local only"); }
   const url = new URL(req.url, "http://x");
   const parts = url.pathname.split("/").filter(Boolean);
+  // A web page open in your browser can POST to 127.0.0.1 and its Host passes the check above. Anything that changes
+  // state must come from Moonstone's own page (or an origin listed in "remoteOrigins") or from a peer server or a
+  // script, which send no Origin at all.
+  const origin = req.headers.origin;
+  if (origin && !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      !["http://127.0.0.1:" + PORT, "http://localhost:" + PORT, ...(CONFIG.remoteOrigins || [])].includes(origin)) {
+    res.writeHead(403); return res.end("wrong origin");
+  }
+  if (req.method === "POST" && isActivity(url.pathname, parts)) lastPost = Date.now();
   // A copy of Moonstone served from somewhere else (a reverse proxy, say) can reach the server on the
   // machine you're sitting at for one thing: the mic. Only origins listed in config "remoteOrigins", only /api/dictate.
   if (url.pathname === "/api/dictate" && req.headers.origin && (CONFIG.remoteOrigins || []).includes(req.headers.origin)) {
@@ -1888,6 +1924,7 @@ const server = http.createServer(async (req, res) => {
       const type = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp", ".heic": "image/heic", ".pdf": "application/pdf" }[ext] || "application/octet-stream";
       res.writeHead(200, { "content-type": type, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" }); return res.end(buf);
     }
+    if (req.method === "GET" && url.pathname === "/api/version") return json(res, 200, idleReport());
     if (req.method === "GET" && url.pathname === "/api/local") return json(res, 200, localState());
     if (req.method === "GET" && url.pathname === "/api/usage") return json(res, 200, (await claudeUsage(url.searchParams.get("peer") === "1")) || { none: true });
     if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, await buildState());

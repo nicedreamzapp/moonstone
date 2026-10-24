@@ -11,12 +11,16 @@
     { "label": "Claude Code", "group": "main", "cwd": "~", "mode": "default" },
     { "label": "Website", "group": "cloud", "cwd": "~/code/website", "mode": "acceptEdits" },
     { "label": "API service", "group": "cloud", "cwd": "~/code/api", "mode": "default" },
+    { "label": "Claude on an API key", "group": "cloud", "cwd": "~", "mode": "default", "keyEnv": "ANTHROPIC_API_KEY",
+      "note": "runs Claude Code on that key instead of your plan" },
     { "label": "Gemma (llama.cpp)", "group": "local", "kind": "pipe", "cmd": "~/models/gemma-chat.sh", "cwd": "~/models",
       "note": "a script that reads a line on stdin and prints › when ready" },
     { "label": "Qwen (OpenAI-style server)", "group": "local", "kind": "api", "url": "http://127.0.0.1:8080",
       "serve": { "cmd": "/opt/homebrew/bin/llama-server", "args": ["-m", "/path/to/model.gguf", "--port", "8080"] },
       "system": "You are a concise, helpful assistant.", "note": "started on first message, stopped after 30 idle minutes" },
     { "label": "Ollama", "group": "local", "kind": "api", "url": "http://127.0.0.1:11434", "health": "/", "model": "llama3.2", "note": "talks to an Ollama server that is already running" },
+    { "label": "Hosted model", "group": "cloud", "kind": "api", "url": "https://api.example.com", "model": "some-model", "keyEnv": "EXAMPLE_API_KEY",
+      "note": "any OpenAI-style https endpoint; the key comes from the environment or envFile" },
     { "label": "Activity Monitor", "group": "tasks", "kind": "open", "path": "/System/Applications/Utilities/Activity Monitor.app" }
   ],
   "stt": { "python": "/usr/bin/python3", "model": "mlx-community/whisper-large-v3-turbo" },
@@ -24,5 +28,11 @@
   "speak": { "url": "http://127.0.0.1:8080", "model": "any-small-local-model" },
   "dictate": {},
   "remoteOrigins": [],
-  "oneWindowTerminals": []
+  "oneWindowTerminals": [],
+  "envFile": "~/.config/moonstone/keys.env",
+  "fallback": { "launcher": "Gemma (llama.cpp)" },
+  "fresh": { "pct": 25 },
+  "done": { "idleMinutes": 60, "keepDays": 7 },
+  "chatMail": { "repliesOnly": false },
+  "autoupdate": { "branch": "main", "restart": ["launchctl", "kickstart", "-k", "gui/501/com.example.moonstone"] }
 }

@@ -44,6 +44,8 @@ function loadLaunchers() {
   // kind: "claude" (a Claude Code chat), "pipe" (a local-model chat driven over stdin/stdout),
   // "open" (just opens that app on this machine). group: main | cloud | local | tasks.
   const tilde = v => (v ? String(v).replace(/^~/, HOME) : v);
+  // re-read config.json each time, so a new launcher shows up without a restart
+  try { CONFIG.launchers = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8")).launchers || CONFIG.launchers; } catch {}
   if (CONFIG.launchers) return CONFIG.launchers.map((l, i) => ({ id: l.label.toLowerCase().replace(/[^a-z0-9]+/g, "-"), mode: "default", kind: "claude", group: "cloud", color: COLORS[i % COLORS.length], ...l, cwd: tilde(l.cwd) || HOME, cmd: tilde(l.cmd), path: tilde(l.path) }));
   // (api launchers keep url / serve / system from config as-is)
   const out = [];

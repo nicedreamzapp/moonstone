@@ -61,11 +61,11 @@
 
 📂 **The work folds away** · Each answer shows the final text; the tool calls behind it sit under a "Show the work · 5 steps · 2m 22s" bar.
 
-🔵 **Your turn** · When the latest answer ends by asking you something, the session gets a pulsing blue YOUR TURN badge in the list, sorted right under NEEDS YOU, with "Waiting on you:" and the question as its last line. Inside the chat, a banner quoting the question sits above the message box, and the tab title starts with "● Your turn", so you can tell from another window.
+🔵 **Your turn** · When the latest answer ends by asking you something, the session gets a pulsing blue YOUR TURN badge in the list, sorted right under NEEDS YOU, with "Waiting on you:" and the question as its last line. Inside the chat, a banner quoting the question sits above the message box, and the tab title starts with "● Your turn", so you can tell from another window. The question is cut at a real sentence end, so a version number or "e.g." inside it no longer chops it short.
 
-⏳ **Background work stays visible** · When Claude starts a background agent, a `run_in_background` command or a monitor, a card pinned to the bottom of the chat shows it until it finishes. The card has a pulsing dot, its latest step ("Reading huggingface.co/...", or the last line of the command's output) with how long ago that changed, a progress bar, and an ETA with a finish time that ticks every second. Moonstone reads all of this from the session transcript, so nothing has to be registered. The ETA comes from a `~5m` hint in the task description if there is one, otherwise from the median time of past tasks of the same kind (kept in `bg-history.json`). A long script running outside a session can report its own progress with `tools/job start <id> "what it's doing" --total N`, `tools/job tick <id> <done>` and `tools/job done <id>`. The cards fold into one small "● 2 working" pill until you tap it, and each agent card carries a badge for the model doing the work (Opus, Sonnet, Haiku). A card only stays while its work is provably alive: the chat's Claude process is running and was already running when the work started, an agent has written something in the last 20 minutes and did not stop on a usage limit, and it is younger than a few hours. Work that died quietly stops pulsing on its own.
+⏳ **Background work stays visible** · When Claude starts a background agent, a `run_in_background` command or a monitor, a card pinned to the bottom of the chat shows it until it finishes. The card has a pulsing dot, its latest step ("Reading huggingface.co/...", or the last line of the command's output) with how long ago that changed, a progress bar, and an ETA with a finish time that ticks every second. Moonstone reads all of this from the session transcript, so nothing has to be registered. The ETA comes from a `~5m` hint in the task description if there is one, otherwise from the median time of past tasks of the same kind (kept in `bg-history.json`). A long script running outside a session can report its own progress with `tools/job start <id> "what it's doing" --total N`, `tools/job tick <id> <done>` and `tools/job done <id>`. The cards fold into one small "● 2 working" pill until you tap it, and each agent card carries a badge for the model doing the work (Opus, Sonnet, Haiku). A card only stays while its work is provably alive: the chat's Claude process is running and was already running when the work started, an agent has written something in the last 20 minutes and did not stop on a usage limit, and it is younger than a few hours. Work that died quietly stops pulsing on its own. When the turn has ended but its agents or tasks are still going, the chat says so in violet: a pulsing "2 WORKING IN BACKGROUND" badge in the list, a violet dot on its chip in the chat switcher, and a violet "still working in the background" pill in the chat. A chat that is waiting on you while its agents run keeps its YOUR TURN or NEEDS YOU badge and gets the violet dot beside it. Such a chat is never Safe to close and never moves to the Done list until the work reports back.
 
-🔢 **Live token count** · The Working line counts tokens as they stream and ticks the seconds, and every finished answer shows what it cost.
+🔢 **Live token count** · The Working line counts tokens as they stream and ticks the seconds, with a pill for the model doing the work beside them (the same pill sits in the chat header), and every finished answer shows what it cost.
 
 🏷️ **Subjects and requests** · Every chat gets a short subject from your first real message, refined once by Haiku (rename it with a tap, and your name wins). Next to it, a Requests pill keeps a checklist of what you asked for in that chat, with "3/4" done. Haiku reads only when you said something new, and a short "ok" or "continue" never counts as a request. Long chats change their mind, so a request a later one replaced shows as replaced, one you called off as cancelled, one whose only remaining step is someone else's (a store review, a delivery) as waiting, and one handed to another chat as sent. None of those count against the total. A Subjects panel lists what the chat covered, in order; tap one to jump there.
 
@@ -79,7 +79,7 @@
 
 🛟 **When Claude runs out** · Point `fallback` at one of your local pipe launchers and a chat that hits the usage limit keeps going in the same card on that model, which is told which transcript to pick up from. Its replies sit under a banner with a "Back to Claude" button, and once the limit resets (or any chat on the machine gets a real Claude answer) the next message goes back to Claude.
 
-📎 **Photos and files** · The + next to the message box attaches photos or files. They are saved on the machine running that chat, wait as thumbnails until you send, and reach Claude as file paths it can open. Drop or paste a picture anywhere on the window to attach it, and tap one to see it full size. Drop any other file, folder or app and its full path lands in the box, the way a terminal does it.
+📎 **Photos and files** · The + next to the message box attaches photos or files. They are saved on the machine running that chat, wait as thumbnails until you send, and reach Claude as file paths it can open. Drop or paste a picture anywhere on the window to attach it, and tap one to see it full size. Drop any other file, folder or app and its full path lands in the box, the way a terminal does it. A message you send while Claude is still working stays on screen, marked "waiting", until the transcript holds it, even across a page reload.
 
 
 <img src="docs/img/permission.png" alt="A session asking permission to run a command, with Allow and Don't buttons" width="100%">
@@ -198,7 +198,7 @@ Then list it in `config.json` as `{"id": "m2", "name": "M2", "url": "http://127.
 
 Every chat has an id that works from any machine, like `m1~c84627d9` (a Moonstone chat) or `m1~t:05785fee` (a terminal one). From inside a chat, Claude can hand another chat a result with `chat-send <id> "text"`. The server delivers it locally or carries it to the other machine over the tunnel it already has. An idle chat gets it as a new turn, clearly marked as coming from another chat and not from you; a busy or terminal chat gets it on its next turn. `chat-send status` shows receipts (queued, delivered, read), `chat-send list` shows every live chat and its id.
 
-A few guards keep this sane: a chat you are typing in is never woken, nor one waiting on you, a sender gets a few wakes per 10 minutes, and a back-and-forth stops after three hops. Set `chatMail.repliesOnly` if you want a chat to accept messages only from a chat it messaged first.
+A few guards keep this sane: a chat you are typing in is never woken, nor one waiting on you, a sender gets a few wakes per 10 minutes, and a back-and-forth stops after three hops. A chat acts on a message only if it is about the job it was started for; anything else it ignores without mentioning it, so a message never pulls a chat off your task. Set `chatMail.repliesOnly` if you want a chat to accept messages only from a chat it messaged first.
 
 To set it up, put `chat-send` on your PATH and add the hook:
 
@@ -280,6 +280,18 @@ Moonstone can run commands on your machines, so it is deliberately boring about 
 - **Audio stays local.** Transcription and speech run on your own machines. Temporary audio files are deleted after each transcription.
 - If you put Moonstone behind a reverse proxy, have the proxy add `X-Via-Proxy: 1`. Moonstone then treats those windows as remote: they will not press dictation keys on a screen you are not sitting at, and they will not be pulled to sessions started from local launchers.
 
+### macOS app
+
+`mac/app` builds `Moonstone.app`, a plain window around the page with its own Dock icon. It takes Finder drops itself, so a dropped picture attaches and any other file, folder or app drops its real path without the Spotlight lookup a browser needs. The window title follows the page, so "● Your turn" shows in the Dock and Mission Control.
+
+```bash
+mac/app/build.sh                     # builds ~/Applications/Moonstone.app
+open ~/Applications/Moonstone.app    # opens http://127.0.0.1:8899/ (or $DOCK_PORT)
+open ~/Applications/Moonstone.app --args http://127.0.0.1:8899/   # or any Moonstone URL
+```
+
+Add `--background` to open it behind whatever you are using.
+
 ### Project layout
 
 ```
@@ -292,6 +304,7 @@ tools/chat-send.js     one chat sends another a message (put a chat-send wrapper
 tools/moonstone-peers.py  the UserPromptSubmit hook: other live chats, their files, waiting messages
 updater.js             keeps a git-clone install current, restarting only when nothing is working
 mac/                   Moonstone Dictate helper (Swift) and build script
+mac/app/               Moonstone.app, a native window that takes Finder drops
 icon/                  app icons and the Python scripts that draw them
 docs/                  the project website (GitHub Pages)
 ```

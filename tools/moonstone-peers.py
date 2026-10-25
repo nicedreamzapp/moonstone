@@ -224,6 +224,7 @@ def run_peers(st, mine):
     lines = lines[:10]
     return ("OTHER LIVE MOONSTONE CHATS right now (other windows/machines, not the user's words to you):\n"
             + "\n".join(lines)
+            + "\nChats may message each other (chat-send <id> \"...\"), but only about the receiving chat's own job; never pull a chat off the task the user started it for."
             + "\nThis list is for coordination only: don't report other chats' work as pending in this chat."
             + "\nBefore editing a file another live chat touched in the last 2 hours, ask the user first.")
 

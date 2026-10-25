@@ -105,6 +105,16 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.04em;white-space:nowrap}
 .badge.need{color:#ffd28c;background:rgba(255,171,61,.16);border:1px solid rgba(255,171,61,.55);box-shadow:0 0 16px rgba(255,171,61,.35);animation:glow 1.6s ease-in-out infinite}
 .badge.need::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--need)}
+/* background work: violet and pulsing until the chat's agents and background tasks report they finished */
+.badge.bgw{color:#e6d4ff;background:rgba(181,124,255,.18);border:1px solid rgba(181,124,255,.7);animation:bgglow 1.6s ease-in-out infinite}
+.badge.bgw::before{content:"";width:7px;height:7px;border-radius:50%;background:#b57cff;animation:bgpulse 1.4s ease-out infinite}
+@keyframes bgglow{50%{box-shadow:0 0 22px rgba(181,124,255,.6)}}
+@keyframes bgpulse{0%{box-shadow:0 0 0 0 rgba(181,124,255,.75)}70%{box-shadow:0 0 0 9px rgba(181,124,255,0)}100%{box-shadow:0 0 0 0 rgba(181,124,255,0)}}
+.s-bgw .dot{background:#b57cff;animation:bgpulse 1.4s ease-out infinite}
+.bgside{display:inline-block;width:8px;height:8px;margin-right:6px;vertical-align:middle;border-radius:50%;background:#b57cff;animation:bgpulse 1.4s ease-out infinite}
+.schip b.bgw{background:#b57cff;box-shadow:0 0 0 0 rgba(181,124,255,.75);animation:bgpulse 1.4s ease-out infinite}
+.jobwrap.bgw>summary{opacity:1;font-size:12px;font-weight:600;color:#e6d4ff;background:rgba(40,20,70,.85);border-color:rgba(181,124,255,.75);animation:bgglow 1.6s ease-in-out infinite}
+.jobwrap.bgw>summary .dot{width:9px;height:9px;background:#b57cff;animation:bgpulse 1.4s ease-out infinite}
 .badge.ans{color:#bfe0ff;background:rgba(74,168,255,.14);border:1px solid rgba(74,168,255,.45)}
 /* your turn (10/4): the latest answer asked Matt something */
 .badge.turn{color:#d6ecff;background:rgba(74,168,255,.2);border:1px solid rgba(74,168,255,.7);box-shadow:0 0 16px rgba(74,168,255,.4);animation:glow 1.6s ease-in-out infinite}
@@ -335,9 +345,15 @@ button.sj-ok{font-family:inherit;cursor:pointer}
 /* model badge on background agents: which model is doing the work */
 .mdl{display:inline-block;margin-right:6px;padding:0 7px;border-radius:999px;font-size:10px;line-height:15px;letter-spacing:.03em;white-space:nowrap;vertical-align:1px;color:var(--mc);background:color-mix(in srgb,var(--mc) 14%,transparent);border:1px solid color-mix(in srgb,var(--mc) 35%,transparent)}
 .mdl.opus{--mc:#c9a6ff}.mdl.sonnet{--mc:#7fc4ff}.mdl.haiku{--mc:#7fe0b0}.mdl.fable{--mc:#ffb38a}
+.mdl:not(.opus):not(.sonnet):not(.haiku):not(.fable){--mc:#9aa1c4}
+.live .mdl{margin:0;flex-shrink:0}
+.jobwrap>summary .mdl{margin:0 0 0 2px}
+.c-title+.mdl{flex-shrink:0;margin:0}
 /* live token count and seconds on the Working line, token count under each answer */
 .live .secs{flex-shrink:0;font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint)}
 .live .tok{flex-shrink:0;font-variant-numeric:tabular-nums;font-size:11px;padding:1px 7px;border-radius:9px;background:color-mix(in srgb,var(--c) 22%,transparent);color:color-mix(in srgb,var(--c) 55%,white)}
+.u.queued{opacity:.8}
+.u .qtag{display:block;margin-top:3px;font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);text-align:right}
 .atok{margin-top:4px;font-size:10.5px;color:var(--faint,#778);font-variant-numeric:tabular-nums}
 </style>
 </head>
@@ -364,7 +380,15 @@ const openWork = new Set();          // which "show the work" panels are open, k
 const drafts = (()=>{ try { return JSON.parse(sessionStorage.getItem("moonstone.drafts")||"{}"); } catch { return {}; } })();
 const saveDrafts = () => { try { sessionStorage.setItem("moonstone.drafts", JSON.stringify(drafts)); } catch {} };
 addEventListener("pagehide", saveDrafts);
-const pendingSent = {};              // chat id -> messages you sent that the server hasn't shown back yet
+// chat id -> messages you sent that the transcript doesn't hold yet. A message sent mid-turn stays on screen until a
+// turn after the one it was sent into holds it (never dropped on a timer, never matched to an older identical line),
+// and it survives a page reload.
+const pendingSent = (()=>{ try { return JSON.parse(sessionStorage.getItem("moonstone.pending")||"{}"); } catch { return {}; } })();
+const savePending = () => { try { sessionStorage.setItem("moonstone.pending", JSON.stringify(pendingSent)); } catch {} };
+addEventListener("pagehide", savePending);
+const normMsg = t => String(t||"").replace(/\s+/g," ").trim();
+// the first turn a message can land in: the running turn's own prompt is never it, the next one may be
+function pendBase(d){ if(!d || !d.turns) return null; const last = d.turns[d.turns.length-1]; return last ? last.i + 1 : 0; }
 const mdCache = new Map();
 
 async function api(path, body){
@@ -429,7 +453,12 @@ function toast(t){ let e=$("#toast"); if(!e){ e=document.createElement("div"); e
 // ---------- list ----------
 // "Safe to close": the server reads the CLOSE: line of a chat's latest answer (s.close). Only an idle/answered
 // chat with nothing just sent from this window counts; a new prompt clears it at once.
-function safeNow(s){ return !!(s && s.close && s.close.safe && (s.status==="idle" || s.status==="answered") && !(pendingSent[s.id]||[]).length); }
+function safeNow(s){ return !!(s && s.close && s.close.safe && (s.status==="idle" || s.status==="answered") && !s.bg && !(pendingSent[s.id]||[]).length); }
+// the turn ended but an agent or background command from it is still going: pulse violet until its finish note lands
+const bgOf = s => s && s.bg && !["needs","yourturn","error","cooking"].includes(s.status) ? s.bg : 0;
+// a chat that asks you something (or needs you) while its agents still run keeps its badge AND gets a violet pulse beside it
+const bgSide = s => s && s.bg && ["needs","yourturn","error"].includes(s.status) ? s.bg : 0;
+const chatBg = d => (d && d.jobs || []).filter(j=>j.kind).length;
 // same parse as server.js closeOf, for the open chat (works against an older server too)
 function closeOfText(text){
   if(!text) return null; let hit = null;
@@ -439,7 +468,7 @@ function closeOfText(text){
   return {safe:false, why: hit.replace(/^not\s*yet\b/i,"").replace(/^[\s\-–—:,;(]+/,"").replace(/[)\s]+$/,"").trim().slice(0,80)};
 }
 function closeForConvo(d){
-  if(!d || d.busy || d.perm || (pendingSent[openId]||[]).length) return null;
+  if(!d || d.busy || d.perm || chatBg(d) || (pendingSent[openId]||[]).length) return null;
   const t = (d.turns||[])[d.turns.length-1]; if(!t || t.open || !t.answer) return null;   // the newest prompt has no answer yet
   const c = closeOfText(t.answer); if(c && c.safe && d.ask) return {safe:false, why:"question for you"};
   return c;
@@ -454,12 +483,14 @@ function cardHtml(s){
     : s.status==="yourturn" ? `<span class="badge turn" title="${esc(s.ask||"")}">YOUR TURN</span>`
     : s.status==="answered" && !safeNow(s) ? `<span class="badge ans">NEW ANSWER</span>`
     : s.status==="error" ? `<span class="badge err">STOPPED</span>`
+    : bgOf(s) ? `<span class="badge bgw" title="An agent or background task from this chat is still running">${s.bg} WORKING IN BACKGROUND</span>`
     : safeNow(s) ? `<span class="badge safe" title="Everything asked in this chat is done and nothing is pending">✓ Safe to close</span>`
     : s.status==="cooking" ? `<span class="st">${s.kind==="terminal"?"cooking · terminal":"cooking"}</span>`
     : `<span class="st">${ago(s.updated)}</span>`;
-  return `<button class="card s-${s.status}" data-open="${esc(s.id)}">
+  const side = bgSide(s) ? `<span class="bgside" title="${s.bg} still working in the background"></span>` : "";
+  return `<button class="card s-${s.status}${bgOf(s)?" s-bgw":""}" data-open="${esc(s.id)}">
     <span class="dot"></span>
-    <span class="c-name">${esc(s.label)}${s.subject||s.title?`<small>${esc(s.subject||s.title)}</small>`:""}</span>${st}
+    <span class="c-name">${side}${esc(s.label)}${s.subject||s.title?`<small>${esc(s.subject||s.title)}</small>`:""}</span>${st}
     <span class="c-last">${esc(s.status==="yourturn" && s.ask ? "Waiting on you: " + s.ask : s.last)}</span>
     <span class="end${armed===s.id?" armed":""}" role="button" tabindex="0" data-end="${esc(s.id)}" title="End this session">${armed===s.id?"End it?":"×"}</span></button>`;
 }
@@ -522,7 +553,10 @@ function ctxHtml(d){
   const cls = x.pct >= 80 ? " hot" : x.pct >= 60 ? " warm" : "";
   return `<div class="ctxm${cls}" title="How full this chat's memory is. Near 100% it gets summarized and older detail is lost."><span class="bar"><i style="width:${Math.max(2,x.pct)}%"></i></span>memory ${x.pct}% · ${k(x.used)} of ${k(x.max)}</div>`;
 }
-function mdlPill(m){ return m ? `<span class="mdl ${esc(m)}" title="Model: ${esc(m)}">${esc(m[0].toUpperCase()+m.slice(1))}</span>` : ""; }
+function mdlPill(m){ if(!m) return ""; m = String(m); const fam = /^(opus|sonnet|haiku|fable)$/i.test(m) ? m.toLowerCase() : "";
+  return `<span class="mdl ${fam}" title="Model: ${esc(m)}">${esc(fam ? fam[0].toUpperCase()+fam.slice(1) : m)}</span>`; }
+// the model doing this chat's work (the fallback model while one carries the chat)
+const workModel = d => d && (d.fallback && d.fallback.model || d.ctx && d.ctx.model) || "";
 // ---------- chat switcher ----------
 // Every open chat on every machine sits in a row under the header, coloured by machine, the one you're in lit and
 // kept in view, so switching is one tap instead of going back to the list. Order is fixed (machine, then id) so chips
@@ -539,9 +573,9 @@ function chipsHtml(){
   const list = [...S.sessions].sort((a,b)=>((order[a.machine]??99)-(order[b.machine]??99)) || (a.id<b.id?-1:a.id>b.id?1:0));
   return list.map(s=>{
     const nm = s.subject || s.title;
-    const mark = s.status==="needs" ? `<b title="Needs you"></b>` : s.status==="yourturn" ? `<b class="turn" title="Your turn"></b>` : s.status==="answered" && !safeNow(s) ? `<b class="ans" title="New answer"></b>` : safeNow(s) ? `<b class="ok" title="Safe to close"></b>` : "";
+    const mark = s.status==="needs" ? `<b title="Needs you"></b>` : s.status==="yourturn" ? `<b class="turn" title="Your turn"></b>` : bgOf(s) ? `<b class="bgw" title="Working in the background"></b>` : s.status==="answered" && !safeNow(s) ? `<b class="ans" title="New answer"></b>` : safeNow(s) ? `<b class="ok" title="Safe to close"></b>` : "";
     const full = `${nm || s.label || ""} · ${s.label||""} on the ${MN[s.machine]}`;
-    return `<button class="schip${s.id===openId?" cur":""}" style="--c:${MC[s.machine]}" data-open="${esc(s.id)}" title="${esc(full)}"><span class="sl">${esc(shortName(nm) || s.label || "chat")}</span><small>${esc(s.label||"")}</small>${mark}</button>`;
+    return `<button class="schip${s.id===openId?" cur":""}" style="--c:${MC[s.machine]}" data-open="${esc(s.id)}" title="${esc(full)}"><span class="sl">${esc(shortName(nm) || s.label || "chat")}</span><small>${esc(s.label||"")}</small>${mark}${bgSide(s)?`<b class="bgw" title="Working in the background"></b>`:""}</button>`;
   }).join("");
 }
 function chipsScroll(){ const row = $(".c-chips"), c = $(".schip.cur"); if(!row || !c) return; row.scrollLeft = Math.max(0, c.offsetLeft - row.offsetLeft - (row.clientWidth - c.offsetWidth)/2); }
@@ -571,7 +605,8 @@ function jobsHtml(d){
       <div class="jm"><span class="bar${pct===null&&!j.eta_end?" ind":""}"><i style="${pct!==null?`width:${pct}%`:j.eta_end?`width:${jobTimePct(j)}%`:""}"></i></span>${j.total?`<span>${j.done}/${j.total}</span>`:""}<span class="jeta">${esc(jobEta(j))}</span></div>
       ${j.step?`<div class="js"><span class="jst">${esc(j.step)}</span><span class="ago">${esc(jobAgo(j))}</span></div>`:""}</div>`; }).join("");
   // one small pill ("● 4 working"); tap it for the full cards, so they never cover the chat on a phone
-  const pill = js.length ? `<details class="jobwrap"${window.__jobsOpen?" open":""}><summary><span class="dot"></span>${js.length} working</summary><div class="jobcards">${cards}</div></details>` : "";
+  const nbg = chatBg(d), quiet = !d.busy && nbg;   // the turn is over but its agents/tasks aren't: say so loudly
+  const pill = js.length ? `<details class="jobwrap${quiet?" bgw":""}"${window.__jobsOpen?" open":""}><summary><span class="dot"></span>${quiet ? `${nbg} still working in the background` : `${js.length} working`}${[...new Set(js.map(j=>j.model).filter(Boolean))].map(mdlPill).join("")}</summary><div class="jobcards">${cards}</div></details>` : "";
   return `<div class="jobs">${pill}${ctx}</div>`;
 }
 document.addEventListener("toggle", e => { if(e.target.classList && e.target.classList.contains("jobwrap")) window.__jobsOpen = e.target.open; }, true);
@@ -674,7 +709,15 @@ function renderConvo(keepScroll){
   const box = $(".msgs"); const atBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 60; const prev = box?.scrollTop;
   const ta = $("#ta"); if(ta) drafts[openId] = ta.value;
   const pend = pendingSent[openId] || [];
-  for(let j=pend.length-1;j>=0;j--) if(Date.now()-pend[j].at > 120000 || d.turns.slice(-6).some(t=>t.user && t.user.trim()===pend[j].text)) pend.splice(j,1);
+  { const used = new Set(); let gone = false;
+    for(let j=0;j<pend.length;j++){ const x = pend[j], k = normMsg(x.text);
+      const hit = d.turns.find(t => t.user && (x.base == null || t.i >= x.base) && !used.has(t.i) && normMsg(t.user) === k);
+      if(hit){ used.add(hit.i); pend.splice(j--,1); gone = true; } }
+    if(gone) savePending(); }
+  // Claude Code's own queue (from the transcript) covers another window or a reload; show each waiting message once
+  const waiting = pend.map(x=>({text:x.text, at:x.at}));
+  if(d.busy) for(const q of d.queued||[]){ const k = normMsg(q.text); if(!waiting.some(w=>normMsg(w.text)===k) && !d.turns.slice(-2).some(t=>t.user && normMsg(t.user)===k)) waiting.push({text:q.text, at:q.ts||Date.now()}); }
+  const waitTag = x => d.busy ? "waiting" : (Date.now()-x.at > 120000 ? "not delivered yet" : "sending");
   const turnHtml = d.turns.map((t,i)=>{
     // a message another chat sent with chat-send: shown apart, on the left, without the delivery note
     let h = t.user ? (/^\[Chat message, NOT from [^\]]*\]/.test(t.user) ? `<div class="u chatmsg">${uHtml(t.user.replace(/\n\n\(Moonstone delivered this[\s\S]*$/, ""))}</div>` : `<div class="u">${uHtml(t.user)}</div>`) : "";
@@ -683,13 +726,13 @@ function renderConvo(keepScroll){
       // show what it has written so far (Claude's lines between tools, a local model's streaming text);
       // the finished answer replaces it when the turn closes
       const sofar = (t.work||[]).filter(w=>w.k==="text"&&w.text.trim()).map(w=>w.text).concat(t.answer?[t.answer]:[]);
-      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…${(()=>{ const est = d.local && !(d.liveTok || t.tok); const n = est ? Math.round(sofar.join("").length/4) : (d.liveTok ?? t.tok ?? 0); const k = openId+":"+i; openSince[k] ??= Date.now(); return `<span class="tok">${est?"~":""}${n.toLocaleString()} tokens</span><span class="secs" data-since="${openSince[k]}">${Math.round((Date.now()-openSince[k])/1000)}s</span>`; })()}<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
+      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…${(()=>{ const est = d.local && !(d.liveTok || t.tok); const n = est ? Math.round(sofar.join("").length/4) : (d.liveTok ?? t.tok ?? 0); const k = openId+":"+i; openSince[k] ??= Date.now(); return `<span class="tok">${est?"~":""}${n.toLocaleString()} tokens</span><span class="secs" data-since="${openSince[k]}">${Math.round((Date.now()-openSince[k])/1000)}s</span>${mdlPill(workModel(d))}`; })()}<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
     } else if(t.answer || t.hasWork || t.work?.length){
       h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}${t.tok?`<div class="atok">${t.tok.toLocaleString()} tokens</div>`:""}</div>`;
     }
     if(t.banner) h += `<button class="fbback" data-fbback="1" title="Stop the fallback model and send your next message to Claude">Back to Claude</button>`;
     return `<div class="ti" data-ti="${t.i}" style="display:contents">${h}</div>`;   // topics scroll to their turn
-  }).concat(pend.map(x=>`<div class="u">${uHtml(x.text)}</div>`));
+  }).concat(waiting.map(x=>`<div class="u queued">${uHtml(x.text)}<span class="qtag">${waitTag(x)}</span></div>`));
   const turns = turnHtml.join("");
   let ask = "";
   if(d.perm){
@@ -704,7 +747,7 @@ function renderConvo(keepScroll){
   const att = `<button class="micb att" id="att" title="Attach a photo or file">${PLUS_SVG}</button>`;
   const again = `<button class="micb again" id="again" title="Hear the last answer again">↻<span class="lbl"> Hear again</span></button>`;
   const compose = `<div class="glass compose" style="--c:${c}">${att}<textarea id="ta" rows="1" placeholder="Message ${esc(d.label)}…"${v&&!osDict?" readonly":""}>${esc(drafts[openId]||"")}</textarea>${mic}${again}<button class="send" id="send">Send</button></div>`;
-  const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span><button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>`;   // the green Safe to close pill in the subject bar closes the chat
+  const top = `<button class="ghost" id="back">‹ All</button><span class="mpill" style="--c:${c}">${MN[d.machine]}</span><span class="c-title">${esc(d.label)}${d.title?`<small>${esc(d.title)}</small>`:""}</span>${mdlPill(workModel(d))}<button class="micb narr${narrOn?" on":""}" id="narr" title="${narrOn?"Narration on — tap to turn off":"Narration off — tap to have answers read out loud"}">${SPK_SVG}</button>`;   // the green Safe to close pill in the subject bar closes the chat
   const jobs = (d.ask && !d.busy && !d.perm ? `<div class="yourturn"><b>YOUR TURN</b><div class="tq">${esc(d.ask)}</div><div class="qr">${quickAnswers(d).map(o=>`<button class="qa ${qaTone(o)}" data-quick="${esc(o)}">${esc(o)}</button>`).join("")}<button class="qa type" data-type="1">Type something</button></div></div>` : "") + jobsHtml(d);
   turnTitle(!!(d.ask && !d.busy && !d.perm));
   const body = `${turns||`<div class="empty">Say what you want ${esc(d.label)} to do.</div>`}${ask}${notes}${jobs}`;
@@ -903,16 +946,28 @@ async function dropPaths(rest){
   const items = await Promise.all(rest.map(async x => ({ name: x.f.name, dir: x.dir, size: x.dir ? 0 : x.f.size,
     mtime: x.dir ? (x.en ? await meta(x.en) : 0) : x.f.lastModified })));
   let r = {}; try { r = await api("/api/resolve-path", { items }); } catch {}
-  const got = (r.paths || []).map(p => p || null);
+  const got = items.map((_, i) => (r.paths || [])[i] || null);
   const missing = items.filter((_, i) => !got[i]).map(x => x.name);
-  const text = got.filter(Boolean).map(p => /\s/.test(p) ? `"${p}"` : p).join(" ");
-  if(text){ const ta = $("#ta"); const at = ta.selectionStart ?? ta.value.length;
-    const pre = ta.value.slice(0, at), post = ta.value.slice(at);
-    const pad = pre && !/\s$/.test(pre) ? " " : "";
-    ta.value = pre + pad + text + (post && !/^\s/.test(post) ? " " : "") + post;
-    ta.focus(); ta.dispatchEvent(new Event("input", { bubbles: true })); }
+  insertPaths(got.filter(Boolean));
   if(missing.length) toast(`Couldn't find where ${missing.join(", ")} lives on this machine`);
 }
+function insertPaths(paths){
+  const text = paths.map(p => /\s/.test(p) ? `"${p}"` : p).join(" "); const ta = $("#ta"); if(!text || !ta) return;
+  const at = ta.selectionStart ?? ta.value.length;
+  const pre = ta.value.slice(0, at), post = ta.value.slice(at);
+  const pad = pre && !/\s$/.test(pre) ? " " : "";
+  ta.value = pre + pad + text + (post && !/^\s/.test(post) ? " " : "") + post;
+  ta.focus(); ta.dispatchEvent(new Event("input", { bubbles: true }));
+}
+// The Mac app (mac/app) takes Finder drops itself and hands over real paths, plus picture bytes to attach
+window.moonstoneNativeDrop = d => {
+  if(!openId){ toast("Open a session first, then drop it"); return "ok"; }
+  const pics = (d && d.pics || []).map(p => { const b = atob(p.data), u = new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i] = b.charCodeAt(i);
+    return new File([u], p.name, { type: p.type || "image/png" }); });
+  if(pics.length) attachFiles(pics);
+  insertPaths(d && d.paths || []);
+  return "ok";
+};
 addEventListener("paste", e => { const fs = [...(e.clipboardData?.files||[])]; if(!fs.length || !openId) return; e.preventDefault(); attachFiles(fs); });
 async function attachFiles(files){
   const sendTo = openId; if(!sendTo || !files.length) return;
@@ -1250,10 +1305,10 @@ async function sendMsg(){
   pendAtt[openId] = []; savePend(); attStrip();
   ta.value=""; drafts[openId]=""; autosize(ta);
   lastDictTap = lastCtrl = lastKey = 0;                                // you're done talking: show it now, no holding still
-  (pendingSent[openId] = pendingSent[openId] || []).push({text, at: Date.now()}); saveDrafts();
+  (pendingSent[openId] = pendingSent[openId] || []).push({text, at: Date.now(), base: pendBase(D)}); savePending(); saveDrafts();
   if(D && D.turns) renderConvo(false);                                // on screen now, not after the round trip
   const r = await api(`/api/session/${encodeURIComponent(openId)}/send`,{text});
-  if(r.error === "ended" || r.error === "not found"){ pendingSent[openId] = []; toast("That session was ended"); return back(); }
+  if(r.error === "ended" || r.error === "not found"){ pendingSent[openId] = []; savePending(); toast("That session was ended"); return back(); }
   if(r.id && r.id!==openId){ drafts[r.id]=""; return open(r.id); }   // a terminal session just moved in here
   refresh(false);
 }

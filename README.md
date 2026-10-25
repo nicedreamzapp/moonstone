@@ -10,6 +10,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-2ee6d2.svg)
 ![Node](https://img.shields.io/badge/node-%E2%89%A518-ffb547.svg)
 ![Dependencies](https://img.shields.io/badge/npm%20dependencies-0-5aa2ff.svg)
+[![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/nicedreamzapp/moonstone?label=OpenSSF%20Scorecard)](https://scorecard.dev/viewer/?uri=github.com/nicedreamzapp/moonstone)
 
 [Website](https://nicedreamzapp.github.io/moonstone/) · [Quick start](#quick-start) · [Configuration](#configuration) · [Security](#security-model)
 

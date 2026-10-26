@@ -1270,7 +1270,7 @@ function bgScanFile(tp) {
             if (!rid || dup) { e.tasks.delete(c.tool_use_id); continue; }
             const was = e.agents?.get(rid); t.open = true; t.agentId = rid; t.bgId = rid; if (was) { t.label = was.label || t.label; t.model = was.model || null; }
             continue; }
-          if (t.pending) { delete t.pending; if (/moved to the background/.test(txt.slice(0, 300))) t.open = true; else { e.tasks.delete(c.tool_use_id); continue; } }
+          if (t.pending) { delete t.pending; if (/^Command did not complete[^\n]*moved to the background \(ID: \w+\)/.test(txt.slice(0, 300))) t.open = true; else { e.tasks.delete(c.tool_use_id); continue; } }
           if (of) t.outFile = of[1];
           const aid = /agentId: (\w+)/.exec(txt); if (aid) { t.agentId = aid[1]; (e.agents || (e.agents = new Map())).set(aid[1], { label: t.label, model: t.model }); }
           if (/Async agent launched|running in background|moved to the background|Monitor started/.test(txt) === false && t.kind !== "agent") { t.open = false; }

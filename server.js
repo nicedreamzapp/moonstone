@@ -1260,7 +1260,9 @@ function bgScanFile(tp) {
           if (stopped) for (const x of e.tasks.values()) if (x.bgId === stopped || x.agentId === stopped) x.open = false;
           const t = e.tasks.get(c.tool_use_id); if (!t) continue;
           const txt = textOf(c.content);
-          const bid = /running in background with ID: (\w+)/.exec(txt) || /Monitor started \(task (\w+)/.exec(txt); if (bid) t.bgId = bid[1];
+          // a foreground command that hit its timeout says "moved to the background (ID: x)"; without this id a
+          // stop on it never matched and its card sat on "finishing up" for hours
+          const bid = /running in background with ID: (\w+)/.exec(txt) || /moved to the background \(ID: (\w+)\)/.exec(txt) || /Monitor started \(task (\w+)/.exec(txt); if (bid) t.bgId = bid[1];
           const of = /Output is being written to: (\S+?)\.?(?:\s|$)/.exec(txt) || /output_file: (\S+)/.exec(txt);
           if (t.resume) { delete t.resume; delete t.pending;
             const rid = /"resumedAgentId"\s*:\s*"(\w+)"/.exec(txt)?.[1];
@@ -1373,6 +1375,8 @@ function chatOwners() {   // sessionId -> {pid, startedAt} for every live Claude
 function bgDead(t, tp, step) {
   const now = Date.now();
   if (now - t.startMs > (BG_MAX_AGE[t.kind] || 6 * 3600e3)) return "too old";
+  // the command's own output file says it is over ("[killed]" / "[exited with code N]"), whatever the transcript missed
+  if (t.kind !== "agent" && /^\[(killed|exited with code -?\d+)\]$/.test(step?.line || "")) return "command ended";
   const owner = chatOwners().get(path.basename(tp, ".jsonl"));
   if (!owner) {   // nothing owns the chat: give a just-written transcript 2 minutes (a process mid-restart)
     let mt = 0; try { mt = fs.statSync(tp).mtimeMs; } catch {}

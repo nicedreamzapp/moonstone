@@ -32,7 +32,9 @@
   "envFile": "~/.config/moonstone/keys.env",
   "fallback": { "launcher": "Gemma (llama.cpp)" },
   "fresh": { "pct": 25 },
-  "done": { "idleMinutes": 60, "keepDays": 7 },
+  "done": { "idleMinutes": 60, "keepDays": 7, "autoClose": false },
+  "localIdleMinutes": 15,
+  "freeze": { "warn": 30000, "stop": 90000, "tool": 240000 },
   "chatMail": { "repliesOnly": false },
   "autoupdate": { "branch": "main", "restart": ["launchctl", "kickstart", "-k", "gui/501/com.example.moonstone"] }
 }

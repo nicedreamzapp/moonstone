@@ -34,7 +34,7 @@ const sessions = () => [
     last: "Drafted docs/migrate-v2.md with the three breaking changes and a codemod section.", updated: min(48), live: true },
   { id: "pc~c1", machine: "pc", kind: "dock", label: "Claude Code", color: "#8b7bff", title: "Port build scripts to PowerShell", status: "cooking",
     last: "$ pwsh -File scripts/build.ps1 -Configuration Release", updated: min(0.5), running: true },
-  { id: "pc~c2", machine: "pc", kind: "dock", label: "Qwen 2.5 Coder", color: "#a98bff", title: null, status: "idle",
+  { id: "pc~c2", machine: "pc", kind: "dock", label: "Qwen 2.5 Coder", color: "#a98bff", title: null, status: "idle", unloaded: min(80),
     last: "you: explain what this CMake error means", updated: min(95), running: false },
 ];
 

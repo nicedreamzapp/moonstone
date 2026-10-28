@@ -257,7 +257,7 @@ for (const s of state.sessions || []) {
 // what each chat keeps across restarts
 const SAVE_KEYS = ["id", "sessionId", "cwd", "label", "mode", "color", "created", "hidden", "kind", "cmd", "log", "launcher", "ctx",
   "fbAt", "keyEnv", "envFile", "freshSeen", "freshOffer", "freshTo",
-  "subject", "subjectBy", "reqs", "reqsAt", "reqsVer", "reviewAt", "topics", "logBase", "doneAt", "reopenAt"];
+  "subject", "subjectBy", "reqs", "reqsAt", "reqsVer", "reviewAt", "topics", "logBase", "doneAt", "reopenAt", "unloaded"];
 const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify({ sessions: state.sessions.map(s => Object.fromEntries(SAVE_KEYS.map(k => [k, s[k]]))), tmeta: state.tmeta || {}, donePurgeAt: state.donePurgeAt || 0 }, null, 2));
 const procs = new Map(); // dock id -> {child, busy, perm, unread, err}
 
@@ -323,6 +323,9 @@ function onEvent(s, p, d) {
     if (t !== p.liveTok) { p.liveTok = t; broadcast(s.id); }
     return;
   }
+  // a tool step (a long build, a slow command) is Claude working, not frozen: no "no reply" notice while one is open
+  if (d.type === "assistant" && !d.parent_tool_use_id && (d.message?.content || []).some(b => b.type === "tool_use")) p.toolOpen = true;
+  else if (d.type === "user" && !d.parent_tool_use_id) p.toolOpen = false;
   if (d.type === "system" && d.subtype === "init" && d.session_id && s.sessionId !== d.session_id) {
     s.sessionId = d.session_id; if (!s.spare) saveState();
   } else if (d.type === "control_request" && d.request?.subtype === "can_use_tool") {
@@ -477,20 +480,25 @@ function freshLaunch(s, line) {
 // Optional: the script can print invisible OSC codes the window never shows, and Moonstone reads them:
 //   ESC ] 7717 ; tok=N BEL          tokens generated so far this answer (the Working line's counter)
 //   ESC ] 7717 ; ctx=used/limit BEL how full its context is after an answer (the memory meter)
+// MOONSTONE_CHAT_ID is set to the chat's id, so a launcher can keep one conversation per window and reload it after
+// the model was unloaded for being idle.
 const ANSI = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\r/g;
 function startPipe(s) {
-  const env = { ...process.env, PYTHONUNBUFFERED: "1", TERM: "dumb", CLAUDE_SESSION_LABEL: s.label, TQDM_DISABLE: "1" };   // no progress bars in the chat
+  const env = { ...process.env, PYTHONUNBUFFERED: "1", TERM: "dumb", CLAUDE_SESSION_LABEL: s.label, MOONSTONE_CHAT_ID: s.id, TQDM_DISABLE: "1" };   // no progress bars in the chat
   // an in-place handoff names the exact transcript to carry over, and when Claude is expected back
   if (s.fallback) { env.MOONSTONE_TRANSCRIPT = s.fbTranscript || ""; env.MOONSTONE_RESET_AT = String(s.fallback.until); }
   if (!WIN) env.PATH = `${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
   // Windows has no bash: run the launcher line through the shell as written
   const child = WIN ? spawn(s.cmd, { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: true, windowsHide: true })
                     : spawn("/bin/bash", [s.cmd], { cwd: s.cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
-  const p = { child, busy: true, perm: null, unread: false, err: null, pipe: true, out: "" };
+  const p = { child, busy: true, perm: null, unread: false, err: null, pipe: true, out: "", starting: true };
   procs.set(s.id, p);
   s.log = s.log || [];
   if (!s.log.length) s.log.push({ user: null, answer: "", ts: Date.now() }); // the loading banner
+  p.busyAt = Date.now();
   const onOut = chunk => {
+    if (p.stopped) return;   // Moonstone already stopped this turn (the model froze) and said why
+    beat(p, String(chunk));
     const raw = String(chunk); let m;
     const re = /\x1b\]7717;tok=(\d+)\x07/g; while ((m = re.exec(raw))) p.liveTok = +m[1];
     const rc = /\x1b\]7717;ctx=(\d+)\/(\d+)\x07/g;
@@ -500,36 +508,99 @@ function startPipe(s) {
     p.out += raw.replace(ANSI, "").replace(/[^\n\r]*\d{1,3}%\|[^\n\r|]*\|[^\n\r]*\[[^\n\r\]]*\][\r]*/g, "").replace(/\r+(?!\n)/g, "");
     const turn = s.log[s.log.length - 1];
     const ready = /(^|\n)\s*›\s*$/.test(p.out);
+    // a chat restarted by a message (after its model was unloaded) prints its start-up banner and "› " first. That
+    // prompt is the engine getting ready, not the answer: the message is written only now, and the turn stays open.
+    if (ready && p.starting) {
+      p.starting = false;
+      if (p.pendingStart != null) { const t = p.pendingStart; p.pendingStart = null; p.out = ""; p.child.stdin.write(t); broadcast(s.id); return; }
+    }
+    if (p.starting && turn.user) { broadcast(s.id); return; }   // still loading: keep "Loading the model…" up, not the launcher's banner
     let ans = p.out.replace(/(^|\n)\s*›\s*$/, "").replace(/^\s+|\s+$/g, "");
     if (turn.head) ans = turn.head + (ans ? "\n\n" + ans : "");   // the fallback banner stays on top of the stand-in's start-up output
     turn.answer = ans.slice(-20000);
+    // never file an empty answer as finished
+    if (ready && turn.user && !turn.answer.trim()) turn.answer = `⚠ ${s.fbLabel || s.label} finished without writing a reply. Send it again to retry.`;
     if (ready) { p.busy = false; p.unread = true; p.out = ""; turn.end = Date.now(); if (p.liveTok) turn.tok = p.liveTok; if (s.fallback) turn.model = s.fbLabel; saveState(); if (s.kind === "pipe") reqsSoon(s.id); }
     broadcast(s.id);
   };
   child.stdout.on("data", onOut); child.stderr.on("data", onOut);
   child.on("error", e => { p.err = "couldn't start: " + e.message; p.busy = false; deadErr.set(s.id, p.err); broadcast(); });
-  child.on("exit", code => { if (procs.get(s.id) === p) procs.delete(s.id); if (p.busy && !p.ended) deadErr.set(s.id, `stopped (exit ${code})`); saveState(); broadcast(); });
+  child.on("exit", code => {
+    if (procs.get(s.id) === p) procs.delete(s.id);
+    // it quit while loading (not enough memory, a launcher error): the waiting message says so instead of "Loading the model…" forever
+    const t = s.log?.[s.log.length - 1];
+    if (p.starting && p.pendingStart != null && t?.user && !t.end) { t.answer = `⚠ The model didn't load (exit ${code}). ` + (p.out.trim().split("\n").slice(-3).join(" ").slice(0, 300) || "Send it again to retry."); t.end = Date.now(); p.busy = false; }
+    if (p.busy && !p.ended) deadErr.set(s.id, `stopped (exit ${code})`); saveState(); broadcast();
+  });
   return p;
 }
 function sendPipe(s, text) {
   let p = procs.get(s.id);
+  const reload = !!s.unloaded; delete s.unloaded;
   if (!p || p.child.exitCode !== null) p = startPipe(s);
   deadErr.delete(s.id);
-  s.log.push({ user: text, answer: "", ts: Date.now() });
+  // an unloaded model: say so while it loads (the "› " handshake in startPipe holds the message until it is ready)
+  s.log.push({ user: text, answer: p.starting && reload ? "Loading the model…" : "", ts: Date.now() });
+  if (p.starting) {   // still starting up: the message goes in once it shows its "› " prompt
+    p.busy = true; p.unread = false; p.liveTok = 0; p.busyAt = Date.now(); p.alive = 0;
+    p.pendingStart = text.replace(/\n/g, " ") + "\n"; saveState(); broadcast(s.id); return;
+  }
   if (s.log.length > 60) { s.logBase = (s.logBase || 0) + s.log.length - 60; s.log = s.log.slice(-60); }   // keeps request turn numbers steady
-  p.busy = true; p.unread = false; p.out = ""; p.liveTok = 0;
+  p.busy = true; p.unread = false; p.out = ""; p.liveTok = 0; p.busyAt = Date.now(); p.alive = 0;
   p.child.stdin.write(text.replace(/\n/g, " ") + "\n");
   saveState(); broadcast(s.id);
 }
-function killTree(p, sig = "SIGTERM") { try { process.kill(-p.child.pid, sig); } catch { try { p.child.kill(sig); } catch {} } }
-// a local model can hold tens of GB of memory, so an idle one is closed after 30 minutes
+function killTree(p, sig = "SIGTERM") {
+  // Windows: the launcher runs through cmd.exe, and killing only the shell left the model process under it running
+  if (WIN) { try { require("child_process").execFileSync("taskkill", ["/pid", String(p.child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }); return; } catch {} }
+  try { process.kill(-p.child.pid, sig); } catch { try { p.child.kill(sig); } catch {} }
+}
+// ---------- frozen model watch ----------
+// Plain code, no model: a busy chat's Working line says "no reply for Ns" after 30 s without a word or token (an open
+// tool step is work, not a freeze). A pipe chat on a hosted model (group "cloud", or any launcher with "watch": true)
+// is stopped after 90 s of silence, and the chat says which model froze, so you never wait on a dead connection.
+// Local models load for minutes, so they only get the notice. Tunable in config.json "freeze": {warn, stop, tool} in ms.
+const FZ = () => ({ warn: 30e3, stop: 90e3, tool: 240e3, ...(CONFIG.freeze || {}) });
+function beat(p, raw) {
+  const t = raw.replace(ANSI, "").trim();
+  if (t && t !== "›" || /\x1b\]7717;tok=/.test(raw)) p.alive = Date.now();
+}
+function stopTurn(s, p, why) {
+  const fb = CONFIG.fallback && CONFIG.fallback.launcher;
+  const msg = `⚠ ${why}, so I stopped this turn. ` + (fb && fb !== s.label ? `Send here again to retry, or switch to ${fb}.` : "Send here again to retry, or switch to another model.");
+  p.stopped = true; p.ended = true; p.busy = false; p.unread = true;
+  const turn = s.log?.[s.log.length - 1];
+  if (turn) { turn.answer = msg; turn.end = Date.now(); turn.stopped = true; }
+  console.log(new Date().toISOString() + ` watch: ${s.id} ${s.label}: ${why}`);
+  killTree(p, "SIGINT"); setTimeout(() => { if (p.child.exitCode === null && p.child.signalCode === null) killTree(p, "SIGKILL"); }, 5000);
+  saveState(); broadcast(s.id);
+}
+function watchTurn(s, p) {
+  if (!p.pipe || p.stopped || p.starting) return;
+  const l = launchers.find(x => x.label === s.label);
+  if (!(l && (l.watch || l.group === "cloud"))) return;
+  const q = Date.now() - Math.max(p.alive || 0, p.busyAt || 0);
+  if (q >= FZ().stop) return stopTurn(s, p, `${s.fbLabel || s.label} froze: no reply for ${Math.round(q / 1000)} seconds`);
+}
+setInterval(() => { for (const s of state.sessions) { const p = procs.get(s.id); if (p?.busy && !s.hidden) try { watchTurn(s, p); } catch (e) { console.log("watch: " + e.message); } } }, 3000);
+// what the Working line shows: ms since the last word/token, and when to start showing it
+function quietOf(p) {
+  if (!p?.busy || p.api || p.toolOpen && !p.pipe) return null;   // model-server chats keep no clock
+  const base = Math.max(p.pipe ? p.alive || 0 : p.lastEv || 0, p.busyAt || 0); if (!base) return null;
+  return { ms: Date.now() - base, warn: p.toolOpen ? FZ().stop : FZ().warn };
+}
+
+// A local model can hold tens of GB of memory, so an idle one is UNLOADED after 15 minutes (config "localIdleMinutes").
+// Only the process goes: the chat stays in the list with its history, its card shows a small "unloaded" tag, and the
+// next message starts the launcher again (with MOONSTONE_CHAT_ID, so it can pick its own conversation back up).
+// Only the "local" group runs on this machine's memory; hosted models are never unloaded.
+const LOCAL_IDLE_MS = () => (+CONFIG.localIdleMinutes || 15) * 60e3;
 setInterval(() => {
   for (const s of state.sessions) {
     const p = procs.get(s.id); if (!p?.pipe || p.busy) continue;
-    // a pipe launcher in group "cloud" talks to a hosted model and holds no memory here: closing it frees nothing
-    const lc = (CONFIG.launchers || []).find(l => l.label === s.label); if (lc && lc.group === "cloud") continue;
+    const lc = (CONFIG.launchers || []).find(l => l.label === s.label); if (!lc || lc.group !== "local") continue;
     const last = s.log?.[s.log.length - 1]; const at = last?.end || last?.ts || 0;
-    if (Date.now() - at > 30 * 60e3) { killTree(p); s.log.push({ user: null, answer: "(closed after 30 idle minutes to free its memory; send a message to start it again)", ts: Date.now(), end: Date.now() }); saveState(); }
+    if (Date.now() - at > LOCAL_IDLE_MS()) { p.ended = true; killTree(p); s.unloaded = Date.now(); saveState(); broadcast(s.id); }
   }
 }, 60e3);
 
@@ -569,6 +640,7 @@ async function ensureServer(l, onNote) {
   return false;
 }
 async function sendApi(s, text) {
+  delete s.unloaded;   // ensureServer shows "Loading the model…" while it starts again
   const l = launchers.find(x => x.id === s.launcher); if (!l) return;
   const p = procs.get(s.id) || { api: true, busy: false, unread: false, err: null, child: { pid: 0, exitCode: null, kill() {} } };
   procs.set(s.id, p); deadErr.delete(s.id);
@@ -614,7 +686,12 @@ async function sendApi(s, text) {
 setInterval(() => {
   for (const [id, sv] of servers) {
     const busy = state.sessions.some(x => x.launcher === id && procs.get(x.id)?.busy);
-    if (!busy && Date.now() - sv.lastUsed > 30 * 60e3) { try { sv.child.kill(); } catch {} servers.delete(id); }
+    if (!busy && Date.now() - sv.lastUsed > 30 * 60e3) {
+      try { sv.child.kill(); } catch {} servers.delete(id);
+      // the chats on it stay open with their history (sendApi sends it all again); their cards just say the model is unloaded
+      for (const x of state.sessions) if (x.launcher === id && !x.hidden) x.unloaded = Date.now();
+      saveState(); broadcast();
+    }
   }
 }, 60e3);
 
@@ -633,6 +710,7 @@ function send(s, text) {
   if (!p || p.child.exitCode !== null) p = startProc(s);
   deadErr.delete(s.id);
   if (!p.busy) p.pendingText = text;   // a mid-turn message waits in Claude's queue; it must not stand in for the running turn's prompt
+  if (!p.busy) { p.busyAt = Date.now(); p.toolOpen = false; }
   p.busy = true; p.err = null; p.unread = false; p.doneTok = 0; p.curChars = 0; p.liveTok = 0; p.inflight = (p.inflight || 0) + 1;
   sendLine(p, { type: "user", message: { role: "user", content: text } });
   broadcast(s.id);
@@ -700,8 +778,10 @@ function listSessions() {
     if (s.kind === "pipe" || s.kind === "api") {
       const status = p?.busy ? "cooking" : deadErr.get(s.id) ? "error" : p?.unread ? "answered" : "idle";
       const lt = [...(s.log || [])].reverse().find(t => t.answer || t.user);
-      out.push({ id: s.id, kind: "dock", local: true, label: s.label, color: s.color, title: s.kind === "api" ? null : p ? null : "not running", subject: subjectFor(s.id),
-        status, close: !p?.busy && lt?.answer ? closeOf(lt.answer) : null, last: lt ? (lt.answer || "you: " + lt.user).replace(/\s+/g, " ").slice(0, 140) : "", updated: lt?.end || lt?.ts || s.created, running: !!p });
+      out.push({ id: s.id, kind: "dock", local: true, label: s.label, color: s.color, title: s.kind === "api" ? null : p ? null : s.unloaded ? "model unloaded, type to load it again" : "not running",
+        unloaded: s.unloaded && !p?.busy ? s.unloaded : null, subject: subjectFor(s.id),
+        status, close: !p?.busy && lt?.answer ? closeOf(lt.answer) : null, last: lt ? (lt.answer || "you: " + lt.user).replace(/\s+/g, " ").slice(0, 140) : "", updated: lt?.end || lt?.ts || s.created, running: !!p,
+        model: s.kind === "api" ? (launchers.find(x => x.id === s.launcher)?.model || null) : (s.fbLabel || null) });   // the page colours each card by model
       continue;
     }
     const tp = findTranscript(s.sessionId);
@@ -712,7 +792,7 @@ function listSessions() {
     const cooking = !!p?.busy && p.child?.exitCode === null && Date.now() - (p.lastEv || p.born || Date.now()) < 30 * 60e3;
     const status = p?.perm ? "needs" : cooking ? "cooking" : (p?.err || deadErr.get(s.id)) ? "error" : ask ? "yourturn" : p?.unread ? "answered" : "idle";
     out.push({ id: s.id, kind: "dock", label: s.label, color: s.color, title: m?.title || null, subject: subjectFor(s.id),
-      status, ask, close: !p?.busy && !p?.perm ? closeOf(lastAnswer(m)) : null, last: lastLine(m), updated: f?.mtime || s.created, running: !!p, bg: bgCount(tp) });
+      status, ask, close: !p?.busy && !p?.perm ? closeOf(lastAnswer(m)) : null, last: lastLine(m), updated: f?.mtime || s.created, running: !!p, bg: bgCount(tp), model: s.fallback ? (s.fbLabel || null) : null });   // a Claude chat on the fallback model shows that model
   }
   // Terminal sessions: only ones whose Claude process is actually running right now.
   // Claude Code writes ~/.claude/sessions/<pid>.json for every live session.
@@ -742,7 +822,7 @@ function listSessions() {
   return out;
 }
 const rank = s => ({ needs: 0, yourturn: 0.5, error: 1, answered: 2, cooking: 3, idle: 4 }[s.status] ?? 5);
-// "Your turn" (10/4): when the latest answer asks Matt something, pull out that question so the list and
+// "Your turn" (10/4): when the latest answer asks you something, pull out that question so the list and
 // the chat can say plainly that the session is waiting on him. Last paragraph with a "?" -> its last question.
 function lastAnswer(m) {
   if (!m || !m.turns.length) return "";
@@ -1124,7 +1204,9 @@ function reqsView(id) {
 // working, waiting on you (a question, a permission, an unread answer), has open or unread requests, background work
 // still running, or chat mail waiting. Every Sunday 03:00 the Done list drops chats closed more than 7 days ago (dock
 // chats end, terminal chats stop being listed until something new happens; transcripts stay on disk).
-// config "done": {"idleMinutes": 60, "keepDays": 7}, or false to turn the Done list off.
+// config "done": {"idleMinutes": 60, "keepDays": 7, "autoClose": false}, or false to turn the Done list off.
+// The idle sweep is OFF by default: chats only move to Done when you close them yourself. "autoClose": true (or the
+// environment variable DONE_SWEEP=1) turns the idle sweep back on.
 const DONE_CFG = CONFIG.done === false ? null : (CONFIG.done || {});
 const DONE_IDLE_MS = (+DONE_CFG?.idleMinutes || 60) * 60e3, DONE_KEEP_MS = (+DONE_CFG?.keepDays || 7) * 86400e3, DONE_SWEEP_MS = 5 * 60e3;
 const doneMeta = id => String(id).startsWith("t:") ? state.tmeta?.[String(id).slice(2)] || null : state.sessions.find(x => x.id === id && !x.hidden) || null;
@@ -1174,13 +1256,13 @@ function doneReopen(id) {
   if (!m) return false;
   delete m.doneAt; delete m.cleared; m.reopenAt = Date.now(); saveState(); broadcast(); return true;
 }
-if (DONE_CFG && !process.env.DONE_NO_SWEEP) { setTimeout(doneSweep, 60e3); setInterval(doneSweep, DONE_SWEEP_MS); }
+if (DONE_CFG && (DONE_CFG.autoClose === true || process.env.DONE_SWEEP === "1")) { setTimeout(doneSweep, 60e3); setInterval(doneSweep, DONE_SWEEP_MS); }
 // model family for the badge: "opus" | "sonnet" | "haiku" | "fable" | null, from an alias or a full model id
 function modelFam(m) { const x = /opus|sonnet|haiku|fable/i.exec(String(m || "")); return x ? x[0].toLowerCase() : null; }
 // ---------- background jobs (10/4) ----------
 // Long tasks an agent kicks off on this machine register themselves in ~/.claude/job-board
 // (helper: ~/.claude/bin/job). Every open chat on this machine shows them as a pulsing card
-// with progress + ETA, so Matt can see work is happening between replies.
+// with progress + ETA, so you can see work is happening between replies.
 const JOB_DIR = path.join(HOME, ".claude", "job-board");
 function readJobs() {
   let names = []; try { names = fs.readdirSync(JOB_DIR).filter(f => f.endsWith(".json")); } catch { return []; }
@@ -1327,7 +1409,7 @@ function outStep(file) {
   const segs = t.text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map(x => x.trim()).filter(Boolean);
   return { line: segs.length ? segs[segs.length - 1].slice(0, 110) : "Working (no output yet)", at: t.mtime };
 }
-// how full this chat's context is (Matt 10/5): the last main-thread reply's own usage numbers, read from the
+// how full this chat's context is (10/5): the last main-thread reply's own usage numbers, read from the
 // transcript tail. Window per model: Haiku 200K, everything current 1M.
 function ctxOf(tp) {
   if (!tp) return null;
@@ -1431,7 +1513,7 @@ function sessionDetail(id) {
   const tp = s.kind === "pipe" || s.kind === "api" ? null : findTranscript(s.sessionId); const f = tp ? readFileModel(tp) : null;
   const turns = lean(fullTurns(id));
   return { id, kind: "dock", local: s.kind === "pipe" || s.kind === "api", label: s.label, color: s.color, title: f?.model.title || null, cwd: s.cwd, subject: subjectFor(id), reqs: reqsView(id),
-    busy: !!p?.busy, liveTok: p?.busy ? p.liveTok || 0 : null, perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
+    busy: !!p?.busy, liveTok: p?.busy ? p.liveTok || 0 : null, quiet: quietOf(p), perm: p?.perm ? { request_id: p.perm.request_id, tool: p.perm.tool, line: p.perm.line, question: p.perm.question } : null,
     err: (e => s.fallback && limitHit(e) ? null : e)(p?.err || deadErr.get(id) || null), turns, queued: f ? queuedOf(f.model) : [], jobs: bgTasks(tp).concat(readJobs()), ctx: ctxOf(tp) || s.ctx || null,   // the banner already says Claude hit its limit
     fallback: s.fallback ? { until: s.fallback.until, model: s.fbLabel || null } : null,
     fresh: s.freshTo ? { to: s.freshTo } : s.freshAsk ? { asking: true } : s.freshOffer ? { offer: true } : null,
@@ -1546,7 +1628,7 @@ for (const peer of CONFIG.peers) {
   connect();
 }
 
-// Claude plan usage for the bar at the top (Matt 10/5): 5-hour and weekly percent + reset times, the same
+// Claude plan usage for the bar at the top (10/5): 5-hour and weekly percent + reset times, the same
 // numbers claude.ai/settings/usage shows. A Mac reads it with ~/Scripts/claude-usage/usage.py (Claude Code's
 // own keychain login); a machine without it asks its peers. Cached a minute.
 let usageCache = { at: 0, body: null };
@@ -1885,7 +1967,7 @@ function earScrub(t) {
     .replace(/\s+([,.;:!?])/g, "$1").replace(/([,;:])\s*(?=[,;:.])/g, "").replace(/\s+/g, " ").trim();
 }
 // A local agent prints its whole turn: cache-status lines, tool calls, tool output, sometimes a
-// crash, and then the answer. Only the answer is for the ear (Matt, 10/15 evening: "all those
+// crash, and then the answer. Only the answer is for the ear (10/15: "all those
 // numbers"). Cut everything up to the last tool/status line, drop what still looks like code or a
 // log line, and turn a crash into one plain sentence.
 function narrClean(t) {
@@ -1986,12 +2068,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && (url.pathname === "/api/launch" || url.pathname === "/api/continue")) {
       const b = await body(req); req.parsedBody = b;
-      if (b.machine === "auto" && url.pathname === "/api/launch") {  // Desktop launchers let Moonstone pick
-        const st = await buildState(); const l = launchers.find(x => x.id === b.launcher);
-        const opts = st.launchers.filter(x => x.label === l?.label);
-        b.machine = (opts.find(x => x.best) || opts.find(x => x.machine === CONFIG.machine) || opts[0] || {}).machine || CONFIG.machine;
-        b.launcher = (opts.find(x => x.machine === b.machine) || {}).id || b.launcher;
-      }
+      // a chat started on a computer stays on that computer: "auto" (a Desktop launcher) or no machine named means THIS
+      // machine, never the least busy one
+      if (b.machine === "auto" || !b.machine) b.machine = CONFIG.machine;
       if (b.focus) { const wrap = res.end.bind(res); res.end = (data, ...a) => {   // tell local windows to open it
         try { const j = JSON.parse(data); if (j.id) { lastFocus = { id: j.id, at: Date.now() }; broadcast(); } } catch {}
         return wrap(data, ...a); }; }
@@ -2111,7 +2190,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.pathname === "/api/launch") {
         launchers = loadLaunchers();
-        const l = launchers.find(x => x.id === b.launcher); if (!l) return json(res, 400, { error: "unknown launcher" });
+        const l = launchers.find(x => x.id === b.launcher); if (!l) return json(res, 400, { error: `The ${CONFIG.name || CONFIG.machine} can't start that one: it isn't set up on this computer` });
         if (l.kind === "open") {
           spawn(WIN ? "cmd" : "/usr/bin/open", WIN ? ["/c", "start", "", l.path] : [l.path], { detached: true, stdio: "ignore" }).unref();
           return json(res, 200, { opened: true, label: l.label });
@@ -2208,6 +2287,8 @@ const server = http.createServer(async (req, res) => {
         sendLine(p, { type: "control_response", response: { subtype: "success", request_id: r.request_id, response } });
         broadcast(s.id); return json(res, 200, { ok: true });
       }
+      // every close is written down (closes.log beside server.js), so a chat that vanished can be traced
+      if (parts[3] === "close") try { fs.appendFileSync(path.join(__dirname, "closes.log"), `${new Date().toISOString()} ${s.id} ${s.kind || "claude"} busy=${!!p?.busy} from=${req.socket.remoteAddress}\n`); } catch {}
       if (parts[3] === "close" && s.kind === "api") { s.hidden = true; procs.delete(s.id); saveState(); broadcast(); return json(res, 200, { ok: true }); }
       if (parts[3] === "stop" && s.kind === "api") { if (p?.stop && p.busy) p.stop(); return json(res, 200, { ok: true }); }
       if (parts[3] === "stop" && s.kind === "pipe") { if (p) killTree(p, "SIGINT"); return json(res, 200, { ok: true }); }

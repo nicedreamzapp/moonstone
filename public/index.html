@@ -94,6 +94,18 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .end.armed{color:#fff;background:rgba(255,95,122,.4);border-color:var(--err);font-size:11.5px;font-weight:600}
 .c-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-name small{color:var(--dim);font-weight:400;margin-left:6px}
+/* model = the card's fill + a short tag, machine = the ring (famOf / MODEL_FAMS in the script) */
+.cards .card.mf{background:linear-gradient(95deg,color-mix(in srgb,var(--mc) 22%,transparent),color-mix(in srgb,var(--mc) 6%,transparent) 80%);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dc) 45%,transparent);border-top-color:transparent}
+.cards .card.mf:hover{background:linear-gradient(95deg,color-mix(in srgb,var(--mc) 32%,transparent),color-mix(in srgb,var(--mc) 12%,transparent) 80%)}
+.cards .card.mf::before{content:"";position:absolute;left:3px;top:7px;bottom:7px;width:3px;border-radius:2px;background:var(--mc);box-shadow:0 0 8px color-mix(in srgb,var(--mc) 60%,transparent)}
+.mtag{display:inline-block;font:700 9.5px/14px var(--mono,monospace);font-style:normal;letter-spacing:.04em;padding:0 5px;margin-right:6px;border-radius:999px;vertical-align:1px;color:#0b0b14;background:var(--mc);white-space:nowrap}
+.ulm{display:inline-block;font:600 9px/13px var(--mono,monospace);font-style:normal;padding:0 5px;margin-right:6px;border-radius:999px;vertical-align:1px;color:var(--mc);border:1px dashed var(--mc);opacity:.75;white-space:nowrap}
+/* the card's × (and its "End it?" confirm) live in their own last grid column, never drawn over text */
+.card{grid-template-columns:20px minmax(0,1fr) auto auto}
+.card .end,.card:hover .end,.card .end.armed{position:static;grid-column:4;grid-row:1;align-self:center;display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:24px;padding:0 6px;line-height:1;white-space:nowrap}
+.card .end{visibility:hidden}.card:hover .end,.card:focus-within .end,.card .end.armed{visibility:visible}
+@media (hover:none){.card .end,.card .end.armed{visibility:visible;min-width:36px;height:36px;font-size:16px}.card .end.armed{font-size:12px}}
+@media (max-width:600px){.card>.badge{white-space:normal;max-width:118px;line-height:1.25;padding:3px 8px}}
 .c-last{grid-column:2/4;color:var(--faint);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .st{font-size:11.5px;color:var(--dim);white-space:nowrap}
 .dot{width:12px;height:12px;border-radius:50%;justify-self:center}
@@ -116,7 +128,7 @@ body.has-usage .app{height:calc((100dvh - 25px) / 1.2)}
 .jobwrap.bgw>summary{opacity:1;font-size:12px;font-weight:600;color:#e6d4ff;background:rgba(40,20,70,.85);border-color:rgba(181,124,255,.75);animation:bgglow 1.6s ease-in-out infinite}
 .jobwrap.bgw>summary .dot{width:9px;height:9px;background:#b57cff;animation:bgpulse 1.4s ease-out infinite}
 .badge.ans{color:#bfe0ff;background:rgba(74,168,255,.14);border:1px solid rgba(74,168,255,.45)}
-/* your turn (10/4): the latest answer asked Matt something */
+/* your turn (10/4): the latest answer asked you something */
 .badge.turn{color:#d6ecff;background:rgba(74,168,255,.2);border:1px solid rgba(74,168,255,.7);box-shadow:0 0 16px rgba(74,168,255,.4);animation:glow 1.6s ease-in-out infinite}
 .badge.turn::before{content:"";width:7px;height:7px;border-radius:50%;background:#4aa8ff}
 .s-yourturn .dot{background:#4aa8ff;box-shadow:0 0 0 3px rgba(74,168,255,.25),0 0 14px #4aa8ff;animation:beat 1.2s infinite}
@@ -351,6 +363,21 @@ button.sj-ok{font-family:inherit;cursor:pointer}
 .c-title+.mdl{flex-shrink:0;margin:0}
 /* live token count and seconds on the Working line, token count under each answer */
 .live .secs{flex-shrink:0;font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint)}
+.live .quiet{flex-shrink:0;font-variant-numeric:tabular-nums;font-size:11px;color:#ffb35c}.live .quiet:empty{display:none}
+/* copy the whole answer */
+.acts{display:flex;align-items:center;gap:8px;margin-top:6px;min-width:0}.acts .atok{margin:0}
+.cpy{display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;padding:0;border-radius:8px;border:1px solid var(--rim2,rgba(255,255,255,.12));background:rgba(255,255,255,.05);color:var(--faint,#99a);cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.cpy svg{width:14px;height:14px}.cpy:active{background:rgba(255,255,255,.14);color:#e6f2ff}
+/* inside a chat: where it runs, on which model, working or not; and a × that closes it */
+.sj-run{display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 6px 0 5px;border-radius:999px;font:600 10px/18px var(--mono,monospace);white-space:nowrap;color:color-mix(in srgb,var(--dc) 75%,white);background:rgba(0,0,0,.22);border:1px solid color-mix(in srgb,var(--dc) 55%,transparent)}
+.sj-run .dd{width:6px;height:6px;border-radius:50%;background:var(--dc)}
+.sj-run .mtag{margin:0;font-size:9px;line-height:13px;padding:0 4px}
+.sj-run .wk{width:6px;height:6px;border-radius:50%;background:var(--faint);opacity:.6}
+.sj-run.on{color:#b9f5d6}.sj-run.on .wk{background:var(--ok);opacity:1;box-shadow:0 0 6px var(--ok);animation:beat 1.6s ease-in-out infinite}
+.sj-x{flex:none;width:22px;height:20px;padding:0;border-radius:999px;font-size:14px;line-height:1;color:var(--dim);background:rgba(0,0,0,.22);border:1px solid var(--rim);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.sj-x:hover{color:#ffc2cc;border-color:rgba(255,95,122,.55)}
+.sj-x.armed{width:auto;padding:0 8px;font-size:10.5px;font-weight:600;color:#fff;background:rgba(214,48,74,.5);border-color:#ff6b7f;white-space:nowrap}
+@media (hover:none){.sj-x{width:36px;height:36px;font-size:18px;margin:-8px -2px -8px 0}.sj-x.armed{height:36px;font-size:11px}}
 .live .tok{flex-shrink:0;font-variant-numeric:tabular-nums;font-size:11px;padding:1px 7px;border-radius:9px;background:color-mix(in srgb,var(--c) 22%,transparent);color:color-mix(in srgb,var(--c) 55%,white)}
 .u.queued{opacity:.8}
 .u .qtag{display:block;margin-top:3px;font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);text-align:right}
@@ -425,13 +452,13 @@ function md0(src){
 // The row itself is the button. The machine chips are CHOOSERS, not launchers:
 // tapping one picks where this launcher goes and is remembered in this window, so the
 // glowing chip always means "the row starts here". Until you pick, the glow is the
-// server's own suggestion (the least busy machine).
+// computer this page is served from: a chat started here stays here.
 const GROUPS = [["cloud","Cloud"],["local","Local"],["tasks","Tasks"]];
 let openGroups = new Set(); try { openGroups = new Set(JSON.parse(localStorage.getItem("ms.groups")||"[]")); } catch {}
 let pickBy = {}; try { pickBy = JSON.parse(localStorage.getItem("ms.pick")||"{}"); } catch {}
 function launchItem(label, opts, main){
   // a chosen machine wins; if it went offline it is not in opts and we fall back to the suggestion
-  const best = opts.find(o=>o.machine===pickBy[label]) || opts.find(o=>o.best) || opts[0];
+  const best = opts.find(o=>o.machine===pickBy[label]) || opts.find(o=>o.machine===homeM()) || opts[0];
   const multi = opts.length > 1;
   const chips = multi ? `<span class="chips">${opts.map(o=>`<button class="chip${o.machine===best.machine?" best":""}" style="--c:${MC[o.machine]}" data-choose="${esc(label)}" data-machine="${o.machine}" title="Send ${esc(label)} to the ${MN[o.machine]}">${MN[o.machine]}</button>`).join("")}</span>` : "";
   return `<div class="li${main?" main":""}" style="--c:${best.color}">
@@ -439,6 +466,8 @@ function launchItem(label, opts, main){
       <span class="ln">${esc(label)}</span>${multi?`<span class="on" style="--m:${MC[best.machine]}">on ${MN[best.machine]}</span>`:""}
       ${opts[0].note?`<small>${esc(opts[0].note)}</small>`:""}</button>${chips}</div>`;
 }
+// the machine whose dock serves this page (the server lists its own machine first)
+function homeM(){ const m = ((S && S.machines)||[]).find(x=>x.online); return m ? m.id : null; }
 function launchHtml(){
   const by = new Map();
   for(const l of S.launchers){ if(!by.has(l.label)) by.set(l.label, []); by.get(l.label).push(l); }
@@ -471,12 +500,38 @@ function closeForConvo(d){
   if(!d || d.busy || d.perm || chatBg(d) || (pendingSent[openId]||[]).length) return null;
   const t = (d.turns||[])[d.turns.length-1]; if(!t || t.open || !t.answer) return null;   // the newest prompt has no answer yet
   const c = closeOfText(t.answer); if(c && c.safe && d.ask) return {safe:false, why:"question for you"};
+  // models that never write a CLOSE: line (most local and hosted ones): with no CLOSE line, the chat's own request
+  // list decides: every request done, nothing running, no question = safe
+  if(!c && !d.ask){ const it = ((d.reqs||{}).items)||[]; if(it.length && it.every(x=>x.status==="done")) return {safe:true}; }
   return c;
 }
 let doneOpen = null;   // which machine's Done list is expanded
 function doneHtml(key, dn){
   return !dn.length ? "" : `<button class="dn-pill${doneOpen===key?" on":""}" data-donebox="${key}" title="Chats closed with all their requests done; tap to see and reopen">Done<b>${dn.length}</b></button>` +
     (doneOpen===key ? `<div class="dn-list">${dn.map(s=>`<div class="dn-row"><span>${esc(s.subject || s.title || s.last || s.label || "")}</span><small>${ago(s.doneAt)}</small><button data-reopen="${esc(s.id)}" title="Bring it back with its history">Reopen</button></div>`).join("")}</div>` : "");
+}
+// every chat card is filled with its MODEL's colour plus a short tag; the machine colour is the ring around the card.
+// Checked against the real model first (a Claude chat running on the fallback model shows that model), then the label.
+// One place to change them.
+const MODEL_FAMS = [
+  [/claude|opus|sonnet|haiku|fable/i, "CL", "#e07a45", "Claude"],
+  [/gemini/i, "GEM", "#4f8cff", "Gemini"],
+  [/gemma/i, "GMA", "#7dd3fc", "Gemma"],
+  [/llama/i, "LLA", "#f5d142", "Llama"],
+  [/qwen/i, "QWN", "#b58cff", "Qwen"],
+  [/mistral|mixtral|devstral/i, "MIS", "#ff9f43", "Mistral"],
+  [/deepseek/i, "DSK", "#5b8def", "DeepSeek"],
+  [/glm/i, "GLM", "#84cc16", "GLM"],
+  [/minimax/i, "MMX", "#ff4fa3", "MiniMax"],
+  [/nemotron/i, "NEM", "#76b900", "Nemotron"],
+  [/gpt|openai/i, "GPT", "#10a37f", "GPT"],
+  [/liquid|lfm/i, "LFM", "#2ee6d6", "Liquid LFM"],
+  [/phi-?\d/i, "PHI", "#00bcf2", "Phi"],
+];
+function famOf(s){
+  for(const v of [s.model, s.label]){ if(!v) continue; const h = MODEL_FAMS.find(([rx])=>rx.test(v)); if(h) return {ab:h[1], c:h[2], name:h[3] + (s.model && s.model!==h[3] ? " · " + s.model : "")}; }
+  if(s.model) return {ab:"LOC", c:"#9aa1c4", name:s.model};
+  return s.local ? {ab:"LOC", c:"#9aa1c4", name:"Local model"} : {ab:"CL", c:"#e07a45", name:"Claude"};   // Claude Code chats
 }
 function cardHtml(s){
   const st = s.status==="needs" ? `<span class="badge need">NEEDS YOU</span>`
@@ -488,13 +543,14 @@ function cardHtml(s){
     : s.status==="cooking" ? `<span class="st">${s.kind==="terminal"?"cooking · terminal":"cooking"}</span>`
     : `<span class="st">${ago(s.updated)}</span>`;
   const side = bgSide(s) ? `<span class="bgside" title="${s.bg} still working in the background"></span>` : "";
-  return `<button class="card s-${s.status}${bgOf(s)?" s-bgw":""}" data-open="${esc(s.id)}">
+  const f = famOf(s);
+  return `<button class="card mf s-${s.status}${bgOf(s)?" s-bgw":""}" style="--mc:${f.c};--dc:${MC[s.machine]}" data-open="${esc(s.id)}">
     <span class="dot"></span>
-    <span class="c-name">${side}${esc(s.label)}${s.subject||s.title?`<small>${esc(s.subject||s.title)}</small>`:""}</span>${st}
+    <span class="c-name">${side}<i class="mtag" title="Model: ${esc(f.name)} · ring = ${esc(MN[s.machine])}">${f.ab}</i>${s.unloaded?`<i class="ulm" title="Model unloaded after sitting idle to give the memory back; type to load it again">unloaded</i>`:""}${esc(s.label)}${s.subject||s.title?`<small>${esc(s.subject||s.title)}</small>`:""}</span>${st}
     <span class="c-last">${esc(s.status==="yourturn" && s.ask ? "Waiting on you: " + s.ask : s.last)}</span>
     <span class="end${armed===s.id?" armed":""}" role="button" tabindex="0" data-end="${esc(s.id)}" title="End this session">${armed===s.id?"End it?":"×"}</span></button>`;
 }
-// tab title says when something is waiting on Matt, so it shows even when the window is in the background
+// tab title says when something is waiting on you, so it shows even when the window is in the background
 const baseTitle = document.title;
 function turnTitle(on){ const t = on ? "● Your turn · " + baseTitle : baseTitle; if(document.title !== t) document.title = t; }
 function renderList(){
@@ -612,7 +668,11 @@ function jobsHtml(d){
 document.addEventListener("toggle", e => { if(e.target.classList && e.target.classList.contains("jobwrap")) window.__jobsOpen = e.target.open; }, true);
 // the Working line ticks seconds too (a model that thinks silently only reports its tokens at the end)
 const openSince = {};
-setInterval(()=>{ for(const e of document.querySelectorAll(".live .secs")) e.textContent = Math.round((Date.now()-e.dataset.since)/1000)+"s"; }, 1000);
+setInterval(()=>{ if(!selInMsgs()) for(const e of document.querySelectorAll(".live .secs")) e.textContent = Math.round((Date.now()-e.dataset.since)/1000)+"s";
+  for(const e of document.querySelectorAll(".live .quiet")){ const t = quietTxt(+e.dataset.at, +e.dataset.warn); if(e.textContent !== t) e.textContent = t; } }, 1000);
+// "is it frozen or still working?": after 30 s without a word or token the Working line says so; the dock stops a
+// frozen hosted model at 90 s and says which one
+function quietTxt(at, warn){ const q = Date.now()-at; return q >= warn ? `no reply for ${Math.round(q/1000)}s` : ""; }
 function jobTimePct(j){ const now = Date.now()/1000; return Math.max(3, Math.min(97, Math.round(100*(now-j.start)/Math.max(1, j.eta_end-j.start)))); }
 function jobAgo(j){ if(!j.stepAt) return ""; const s = Math.max(0, Math.round(Date.now()/1000 - j.stepAt)); return s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.floor(s/60)}m ago`; }
 // every second: tick the ETA, the "Xs ago", and the time-based bar in place (no repaint, so typing/dictation is untouched)
@@ -629,6 +689,30 @@ const autoScan = new Set();            // chats this window already asked to rea
 const fmtTok = n => n >= 1e6 ? (n/1e6).toFixed(n >= 1e7 ? 0 : 1)+"M" : n >= 1000 ? Math.round(n/1000)+"k" : String(n);
 function fmtWhen(ts){ if(!ts) return ""; const d = new Date(ts), now = new Date();
   return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : d.toLocaleDateString([], {month:"short", day:"numeric"}); }
+// inside the open chat, one compact tag says where it runs (machine colour dot + name), on which model (same colour
+// and tag as its card) and whether it is working right now
+function runTag(d){
+  const s = (S && S.sessions || []).find(x=>x.id===openId) || {label:d.label, local:d.local, machine:d.machine};
+  const mach = s.machine || homeM();
+  const f = famOf({...s, model:(d.fallback && d.fallback.model) || s.model}), on = !!d.busy;
+  return `<span class="sj-run${on?" on":""}" style="--dc:${MC[mach]};--mc:${f.c}" title="Running on the ${esc(MN[mach])} · ${esc(f.name)} · ${on?"working now":"idle"}"><i class="dd"></i>${esc(MN[mach])}<i class="mtag">${f.ab}</i><i class="wk"></i>${on?"working":""}</span>`;
+}
+// a × inside every chat, same close as the list's ×, always two taps: the first asks "End it?" (or "Still working,
+// end it?" mid-turn), the second closes and opens the next chat, or goes back to the list
+let xArmed = null;
+function chatX(d){ const a = xArmed === openId;
+  return `<button class="sj-x${a?" armed":""}" data-chatx="1" title="Close this chat">${a?(d && d.busy?"Still working, end it?":"End it?"):"×"}</button>`; }
+async function chatXTap(){
+  const id = openId; if(!id) return;
+  if(xArmed !== id){ xArmed = id; if(D) subjPaint(D); setTimeout(()=>{ if(xArmed===id){ xArmed = null; if(D && openId===id) subjPaint(D); } }, 4000); return; }
+  xArmed = null;
+  const order = ((S && S.sessions) || []).map(x=>x.id);
+  const i = order.indexOf(id), next = order.slice(i+1).concat(order.slice(0, Math.max(0,i))).find(x=>x!==id);
+  const r = await api(`/api/session/${encodeURIComponent(id)}/close`, {});
+  if(!(r && r.ok)){ toast((r && r.error) || "Couldn't close it"); return; }
+  toast("Closed"); if(S) S.sessions = S.sessions.filter(x=>x.id!==id);
+  return next ? open(next) : back();
+}
 function subjHtml(d){
   const r = d.reqs || {}, items = r.items || [], done = items.filter(x=>x.status==="done").length, topics = r.topics || [];
   // handed to another chat, replaced by a later ask, or called off: none of them are this chat's to finish.
@@ -669,7 +753,7 @@ function subjHtml(d){
   const cl = closeForConvo(d);
   const close = cl && cl.safe ? (d.kind==="dock" ? `<button class="sj-ok" data-safeclose="1" title="Everything you asked in this chat is done: tap to close the chat">✓ Safe to close</button>` : `<span class="sj-ok" title="Everything you asked in this chat is done, approved, and nothing is running or waiting">✓ Safe to close</span>`)
     : cl && cl.why ? `<span class="sj-op" title="Not safe to close yet: ${esc(cl.why)}">open: ${esc(cl.why)}</span>` : "";
-  return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(subj)}</button>${side}${close}${spill}${pill}${drop}`;
+  return `<button class="sj-t" id="sjt" title="Tap to rename">${esc(subj)}</button>${side}${close}${runTag(d)}${spill}${pill}${chatX(d)}${drop}`;
 }
 function subjPaint(d){
   const el = $("#csubj"); if(!el || $("#sjin")) return;   // never repaint under typing
@@ -726,9 +810,9 @@ function renderConvo(keepScroll){
       // show what it has written so far (Claude's lines between tools, a local model's streaming text);
       // the finished answer replaces it when the turn closes
       const sofar = (t.work||[]).filter(w=>w.k==="text"&&w.text.trim()).map(w=>w.text).concat(t.answer?[t.answer]:[]);
-      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…${(()=>{ const est = d.local && !(d.liveTok || t.tok); const n = est ? Math.round(sofar.join("").length/4) : (d.liveTok ?? t.tok ?? 0); const k = openId+":"+i; openSince[k] ??= Date.now(); return `<span class="tok">${est?"~":""}${n.toLocaleString()} tokens</span><span class="secs" data-since="${openSince[k]}">${Math.round((Date.now()-openSince[k])/1000)}s</span>${mdlPill(workModel(d))}`; })()}<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
+      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…${(()=>{ const est = d.local && !(d.liveTok || t.tok); const n = est ? Math.round(sofar.join("").length/4) : (d.liveTok ?? t.tok ?? 0); const k = openId+":"+i; openSince[k] ??= Date.now(); return `<span class="tok">${est?"~":""}${n.toLocaleString()} tokens</span><span class="secs" data-since="${openSince[k]}">${Math.round((Date.now()-openSince[k])/1000)}s</span>${d.quiet?`<span class="quiet" data-at="${Date.now()-d.quiet.ms}" data-warn="${d.quiet.warn}">${quietTxt(Date.now()-d.quiet.ms, d.quiet.warn)}</span>`:""}${mdlPill(workModel(d))}`; })()}<span class="live-line">${esc(lastStep?.line||"")}</span></div>${workHtml(t)}</div>`;
     } else if(t.answer || t.hasWork || t.work?.length){
-      h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}${t.tok?`<div class="atok">${t.tok.toLocaleString()} tokens</div>`:""}</div>`;
+      h += `<div class="a">${t.answer?md(t.answer):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}${(t.answer||t.tok)?`<div class="acts">${t.answer?`<button class="cpy" data-copy="${t.i}" title="Copy this answer" aria-label="Copy this answer">${COPY_SVG}</button>`:""}${t.tok?`<span class="atok">${t.tok.toLocaleString()} tokens</span>`:""}</div>`:""}</div>`;
     }
     if(t.banner) h += `<button class="fbback" data-fbback="1" title="Stop the fallback model and send your next message to Claude">Back to Claude</button>`;
     return `<div class="ti" data-ti="${t.i}" style="display:contents">${h}</div>`;   // topics scroll to their turn
@@ -791,15 +875,21 @@ function renderConvo(keepScroll){
 }
 let lastCtrl = 0, lastDictTap = 0;
 document.addEventListener("keydown", e=>{ if(e.key === "Control") lastCtrl = Date.now(); }, true);
+// selecting text (on a phone especially) glitched: every live update rewrote the pieces under the selection and snapped
+// the scroll to the bottom. While any text in the chat is selected, the chat holds still and catches up once it clears.
+function selInMsgs(){ const s = document.getSelection && document.getSelection(); if(!s || s.isCollapsed || !s.rangeCount) return false;
+  const b = document.querySelector(".msgs"); return !!(b && b.contains(s.getRangeAt(0).commonAncestorContainer)); }
+document.addEventListener("selectionchange", () => { if(selInMsgs.was && !selInMsgs() && openId && D){ selInMsgs.was = false;
+  if(pointerHeld) refreshWanted = refreshWanted === null ? true : refreshWanted; else renderConvo(true); } else if(selInMsgs()) selInMsgs.was = true; });
 function holdStill(){
   const now = Date.now();
-  return !!(osDict || sr) || now - lastDictTap < 6000 || now - lastCtrl < 4000 ||
+  return !!(osDict || sr) || selInMsgs() || now - lastDictTap < 6000 || now - lastCtrl < 4000 ||
     (document.activeElement?.id === "ta" && now - lastKey < 2500);
 }
 function autosize(t){ t.style.height="auto"; t.style.height=Math.min(180,t.scrollHeight)+"px"; }
 
 // ---------- data ----------
-// 10/5: Matt had to press buttons several times whenever anything was working. While a chat runs the page
+// 10/5: you had to press buttons several times whenever anything was working. While a chat runs the page
 // rebuilds about twice a second; a rebuild landing between finger-down and finger-up replaced the button
 // under his finger, so the click never fired. Hold rebuilds while a finger or mouse is down, then catch up.
 let pointerHeld = false, refreshWanted = null;
@@ -808,7 +898,7 @@ const pointerDone = ()=>{ if(!pointerHeld) return; setTimeout(()=>{ pointerHeld 
   if(refreshWanted !== null){ const k = refreshWanted; refreshWanted = null; refresh(k).catch(()=>{}); } }, 60); };
 document.addEventListener("pointerup", pointerDone, true);
 document.addEventListener("pointercancel", pointerDone, true);
-// Claude plan usage bar (Matt 10/5): "5h 25% · 6a (2h26m)   Wk 66% · Wed 8a   Fable 0%" — the
+// Claude plan usage bar (10/5): "5h 25% · 6a (2h26m)   Wk 66% · Wed 8a   Fable 0%" — the
 // claude.ai/settings/usage numbers, abbreviated, always on top. Outside #app so rebuilds never touch it.
 function usageWhen(iso, withLeft){
   const d = new Date(Math.round(new Date(iso).getTime()/60000)*60000), now = new Date();
@@ -824,7 +914,7 @@ async function usageTick(){
     const u = await api("/api/usage"); const el = $("#usage"); if(!el) return;
     if(!u || !u.limits || !u.limits.length){ el.innerHTML=""; document.body.classList.remove("has-usage"); return; }
     const weekReset = (u.limits.find(x=>x.kind==="weekly_all")||{}).resets_at;
-    el.innerHTML = u.limits.filter(x=>x.kind==="session"||x.kind==="weekly_all").map(x=>{   // 10/5 Matt: no Fable line
+    el.innerHTML = u.limits.filter(x=>x.kind==="session"||x.kind==="weekly_all").map(x=>{   // 10/5: no Fable line
       const name = x.kind==="session" ? "5h" : x.kind==="weekly_all" ? "Wk" : (x.scope?.model?.display_name || x.kind);
       const p = Math.round(x.percent ?? 0), col = p>=85?"var(--err)":p>=70?"var(--need)":"#3fd1a0";
       const sameAsWeek = x.kind!=="weekly_all" && x.kind!=="session" && x.resets_at && weekReset && Math.abs(new Date(x.resets_at)-new Date(weekReset))<120000;
@@ -873,7 +963,7 @@ document.addEventListener("click", async e=>{
   const o = t.closest("[data-open]"); if(o) return open(o.dataset.open);
   const pk = t.closest("[data-pick]"); if(pk){
     const opts = S.launchers.filter(x=>x.label===pk.dataset.pick);
-    if(opts.length===1){ const r = await api("/api/launch",{launcher:opts[0].id, machine:opts[0].machine}); return r.id?open(r.id):null; }
+    if(opts.length===1){ const r = await api("/api/launch",{launcher:opts[0].id, machine:opts[0].machine}); if(r.error) toast(r.error); return r.id?open(r.id):null; }
     picking = pk.dataset.pick; return renderList(); }
   if(t.closest("#nopick")){ picking=null; return renderList(); }
   const ch = t.closest("[data-choose]"); if(ch){        // chips choose the machine, they do not launch
@@ -881,6 +971,7 @@ document.addEventListener("click", async e=>{
     try{ localStorage.setItem("ms.pick", JSON.stringify(pickBy)); }catch{}
     toast(`${ch.dataset.choose} will start on the ${MN[ch.dataset.machine]}`);
     renderList.last = null; return renderList(); }
+  if(t.closest("[data-chatx]")) return chatXTap();
   const l = t.closest("[data-launch]"); if(l){ picking=null;
     const r = await api("/api/launch",{launcher:l.dataset.launch, machine:l.dataset.machine});
     if(r.opened){ toast(`Opened ${r.label} on the ${MN[l.dataset.machine]}`); return; }
@@ -1065,6 +1156,19 @@ document.addEventListener("pointerdown", e=>{
   if(IS_PHONE && SR && !srBroken) return srStart();
   osDictOn();
 });
+const COPY_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>`;
+// writeText runs inside the tap (iOS only lets a page copy from a tap); older WebKit falls back to a hidden textarea
+function copyText(txt){
+  const old = () => { const t = document.createElement("textarea"); t.value = txt; t.setAttribute("readonly", "");
+    t.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px"; document.body.appendChild(t);
+    t.select(); t.setSelectionRange(0, txt.length); let ok = false; try { ok = document.execCommand("copy"); } catch {} t.remove(); return ok; };
+  if(navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) return navigator.clipboard.writeText(txt).then(() => true, () => old());
+  return Promise.resolve(old());
+}
+document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-copy]"); if(!b) return; e.preventDefault();
+  const t = D && D.turns && D.turns.find(x => String(x.i) === b.dataset.copy);
+  if(!t || !t.answer) return toast("Nothing to copy");
+  copyText(t.answer).then(ok => toast(ok ? "Copied" : "Couldn't copy, press and hold the text instead")); });
 const IS_PHONE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
 // Best path: the computer's own dictation (Mac: Edit > Start Dictation via a helper app, Windows: Win+H), pressed for us by the Moonstone
 // on this machine. Words type straight into the box at native speed. Only works in a window on the machine
@@ -1142,7 +1246,7 @@ function srStart(){
   try { r.start(); } catch { sr = null; srBroken = true; return micToggle(); }
   micState("live");
 }
-// 10/20: whisper invents these from silence ("thank you" typed itself before Matt spoke); alone, they are silence
+// 10/20: whisper invents these from silence ("thank you" typed itself before anyone spoke); alone, they are silence
 const SILENCE_JUNK = /^[\s.!?,♪-]*(thank you( very much| so much)?|thanks( for watching| for listening)?|thank you for watching|you|bye|bye-bye|subtitles by.*|please subscribe.*)?[\s.!?,♪-]*$/i;
 const stt = blob => fetch(BASE + "api/stt", {method:"POST", headers:{"content-type":"application/octet-stream","x-dock":"1"}, body: blob}).then(r=>r.json())
   .then(j => (j && typeof j.text === "string" && SILENCE_JUNK.test(j.text)) ? {...j, text: "", error: "I did not catch that, tap the mic and try again"} : j);
@@ -1224,7 +1328,7 @@ function narrClaim(){ if(Date.now() - claimedAt < 3000) return; claimedAt = Date
 addEventListener("pointerdown", narrClaim, true); addEventListener("keydown", narrClaim, true);
 // Same cut the dock makes server-side (narrClean in server.js), here too so it is live the moment the
 // page reloads: a local agent prints status lines, tool calls, tool output and sometimes a crash before
-// its answer, and only the answer is for the ear (Matt, 10/15 evening).
+// its answer, and only the answer is for the ear (10/15).
 function narrCleanPage(t){
   const s = String(t).replace(/\r/g, "");
   if(/Abort trap|libc\+\+abi|Traceback \(most recent|Segmentation fault|GPU Timeout|Killed: 9|core dumped/i.test(s))
@@ -1237,8 +1341,15 @@ function narrCleanPage(t){
     || /^\s*(warnings\.warn|\w*Warning|\w*Error|Exception|at |File ")/.test(l);
   return lines.slice(cut + 1).filter(l => l.trim() && !codey(l)).join(" ").replace(/\s+/g, " ").trim();
 }
-async function narrSay(md, local){
-  if(micLive()) return;                                        // you're talking: never read over you
+// On a phone the keyboard's own mic does the dictating, and the page can't see it: a voice reading an answer took the
+// phone's audio back and left dictation deaf. A tap in the box, or words arriving in it, stops the voice, and no
+// answer starts reading while you've been in the box in the last 8 seconds.
+var kbAt = 0;
+addEventListener("pointerdown", e => { if(IS_PHONE && e.target.closest && e.target.closest("#ta")){ kbAt = Date.now(); narrHush(); } }, true);
+document.addEventListener("input", e => { if(IS_PHONE && e.target.id === "ta"){ kbAt = Date.now(); if(narrAudio || narrQ.length) narrHush(); } });
+function kbBusy(){ return IS_PHONE && document.activeElement?.id === "ta" && Date.now() - kbAt < 8000; }
+async function narrSay(md, local, again){
+  if(micLive() || (!again && kbBusy())) return;               // you're talking or typing: never read over you
   if(local){ md = narrCleanPage(md); if(!md) return; }        // only the answer, never the work
   try { const o = await (await fetch(BASE+"api/narrator")).json(); if(o.id && o.id !== WIN_ID) return; } catch {}
   // local models write like a log file: have the dock turn it into a few plain spoken sentences first (10/15)
@@ -1252,7 +1363,7 @@ async function narrSay(md, local){
     .then(r => r.ok ? r.blob() : null).catch(()=>null));
   (async()=>{
     for(const pr of narrQ){
-      const b = await pr; if(my !== narrGen || micLive()) return; if(!b) continue;
+      const b = await pr; if(my !== narrGen || micLive() || (!again && kbBusy())) return; if(!b) continue;
       const u = URL.createObjectURL(b); narrAudio = new Audio(u);
       await new Promise(z => { narrAudio.onended = narrAudio.onerror = z; narrAudio.play().catch(z); });
       URL.revokeObjectURL(u); if(my !== narrGen) return;
@@ -1267,7 +1378,7 @@ function narrAgain(){
   const t = D && D.turns ? [...D.turns].reverse().find(x => x.answer && !x.open) : null;   // works mid-turn too: the last finished one
   if(!t) return toast("No answer to play yet"); narrHush();
   fetch(BASE+"api/narrator",{method:"POST",headers:{"content-type":"application/json","x-dock":"1"},body:JSON.stringify({id:WIN_ID})}).catch(()=>{}).finally(() =>
-    narrSay(t.answer, D.local || /gemma|qwen|heretic|muse|local/i.test(D.label||"")));
+    narrSay(t.answer, D.local || /gemma|qwen|heretic|muse|local/i.test(D.label||""), true));
 }
 function narrToggle(){
   narrOn = !narrOn; try { localStorage.setItem("moonstone.narr", narrOn?"1":"0"); } catch {}

@@ -76,7 +76,7 @@
 
 🟢 **Safe to close** · If you ask Claude (in your `CLAUDE.md`) to end status messages with a line like `CLOSE: safe` or `CLOSE: not yet - waiting on the deploy`, Moonstone reads it: a green "Safe to close" pill in the list and the chat, or the reason it is still open. Tap the pill in the chat to close it. A message that still asks you something is never safe.
 
-🗂️ **Done list** · A chat whose requests all read done and that has sat idle for an hour moves into a small Done list under its machine, history intact, with a Reopen button. Nothing is ever tidied away while it is working, waiting on you, has open requests, background work or messages waiting, and anything new in a closed chat brings it straight back. Each Sunday the Done list drops chats closed more than a week ago; transcripts stay on disk.
+🗂️ **Done list** · A chat you close moves into a small Done list under its machine, history intact, with a Reopen button. Chats are never closed for you by default; set `done.autoClose` to `true` and a chat whose requests all read done and that has sat idle for an hour moves there by itself. Nothing is ever tidied away while it is working, waiting on you, has open requests, background work or messages waiting, and anything new in a closed chat brings it straight back. Each Sunday the Done list drops chats closed more than a week ago; transcripts stay on disk.
 
 🔁 **One tap between chats** · Inside a chat, every open chat on every machine sits in a row under the header, coloured by machine, with dots for the ones that need you. Switching is one tap instead of going back to the list.
 
@@ -112,7 +112,11 @@
 <a id="local-models"></a>
 <picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s05-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s05-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s05-banner.svg" width="100%" alt="05. Local models and how it fits together. Same list as Claude, one server per machine"></picture>
 
-💤 **Idle shutdown** · Local models are memory hungry, so a pipe chat or a server Moonstone started is shut down after 30 idle minutes and comes back on the next message.
+💤 **Idle unload** · Local models are memory hungry, so a local pipe chat's model is unloaded after 15 idle minutes (`localIdleMinutes`) and a server Moonstone started is stopped after 30. The chat itself stays open with its history and a small "unloaded" tag; the next message loads the model again and goes in once it is ready (the launcher gets `MOONSTONE_CHAT_ID`, so it can pick its own conversation back up). If a model quits while loading, the chat says so instead of waiting forever.
+
+🧊 **Frozen model watch** · A busy chat's Working line says "no reply for 40s" once it has been quiet for 30 seconds (an open tool step counts as work). A pipe chat on a hosted model (group `cloud`, or any launcher with `"watch": true`) is stopped after 90 seconds of silence and the chat says which model froze. Tune it with `freeze`.
+
+🎨 **Model colours** · Every card on the list is filled with its model's colour and a short tag (CL, GEM, QWN, LLA...), with the machine's colour as the ring, and models that sat idle show "unloaded". Inside a chat, a small tag names the machine, the model and whether it is working, and a × closes the chat in two taps. Every answer has a copy button, the chat holds still while you select text in it, and on a phone the voice stops the moment you tap into the box to dictate or type. A chat started from a page stays on that page's computer.
 
 🧩 **Same server everywhere** · Every machine runs the same server.js.
 
@@ -263,7 +267,9 @@ Everything lives in `config.json` next to `server.js`. All keys are optional. Se
 | `envFile` | A `KEY=value` file the `keyEnv` keys are read from when they are not in the environment. Keep it out of synced folders. |
 | `fallback` | `{launcher}`: the label of a `pipe` launcher that carries a chat when Claude runs out of usage. It gets `MOONSTONE_TRANSCRIPT` and `MOONSTONE_RESET_AT`. Unset = no fallback. |
 | `fresh` | `{pct}`: memory level that offers the Fresh chat pill (default 25), or `false`. |
-| `done` | `{idleMinutes, keepDays}` for the Done list (defaults 60 and 7), or `false` to turn it off. |
+| `done` | `{idleMinutes, keepDays, autoClose}` for the Done list (defaults 60, 7 and `false`), or `false` to turn it off. `autoClose: true` (or `DONE_SWEEP=1`) moves idle, finished chats there by itself. |
+| `localIdleMinutes` | Minutes before an idle local pipe model is unloaded (default 15). The chat stays open. |
+| `freeze` | `{warn, stop, tool}` in milliseconds: when the Working line says "no reply" (30000), when a hosted pipe chat is stopped (90000), and the quiet allowed while a tool step runs (240000). |
 | `chatMail` | `{repliesOnly}`: a chat accepts messages only from a chat it messaged first. |
 | `uploads` | Folder for attached photos and files. Default `uploads/` next to `server.js`. |
 | `autoupdate` | `{remote, branch, restart, port}` for `updater.js`. `restart` is a command as an array, such as `["launchctl", "kickstart", "-k", "gui/501/com.example.moonstone"]`. |

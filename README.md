@@ -14,6 +14,10 @@
 
 [Website](https://nicedreamzapp.github.io/moonstone/) · [Quick start](#quick-start) · [Configuration](#configuration) · [Security](#security-model)
 
+<a href="https://www.youtube.com/watch?v=EuB1J7-q_CU"><img src="docs/img/video-thumb.jpg" width="640" alt="Watch the 30 second Moonstone video on YouTube"></a>
+
+<sub>Watch the 30 second tour on YouTube</sub>
+
 <img src="docs/img/hero.png" alt="Moonstone: the session list across three machines next to an open conversation" width="100%">
 
 </div>

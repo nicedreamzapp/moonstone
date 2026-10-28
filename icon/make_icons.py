@@ -1,4 +1,4 @@
-# Moonstone icons (10/26 Matt): ONE source of truth = the iPhone app icon (translucent ringed moonstone on deep
+# Moonstone icons (10/26): ONE source of truth = the iPhone app icon (translucent ringed moonstone on deep
 # blue, shared/moonstone-ios/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png). Every other Moonstone
 # icon (Mac app, Windows, docs, favicon) is derived from it here. The old purple-tile and crescent icons are retired.
 import sys, os, subprocess, shutil

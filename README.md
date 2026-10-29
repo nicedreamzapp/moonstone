@@ -176,6 +176,14 @@ Every machine runs the same `server.js`. The one you open in the browser lists i
 
 You need Node 18 or newer and [Claude Code](https://docs.claude.com/en/docs/claude-code) installed.
 
+**One line on a Mac** (clones to `~/moonstone`, writes a starter `config.json`, puts `chat-send` in `~/.local/bin`, runs it as a LaunchAgent on port 8899):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/install.sh | bash
+```
+
+Uninstall: `curl -fsSL https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/uninstall.sh | bash` (add `-s -- --purge` to also delete the folder with its config and state). `DOCK_PORT`, `MOONSTONE_DIR` and `MOONSTONE_AUTOUPDATE=1` (runs `updater.js` every 5 minutes) are listed at the top of [`install.sh`](install.sh). By hand:
+
 ```bash
 git clone https://github.com/nicedreamzapp/moonstone.git
 cd moonstone

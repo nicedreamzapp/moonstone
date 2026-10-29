@@ -193,6 +193,14 @@ node server.js
 
 Open **http://localhost:8899**. Set `DOCK_PORT` to use another port.
 
+**Windows, one line in PowerShell.** It checks for Node 18+, clones Moonstone to `%USERPROFILE%\moonstone`, writes a starter `config.json`, and adds two hidden Task Scheduler tasks: one runs the server at logon, one runs `updater.js` every 5 minutes.
+
+```powershell
+irm https://raw.githubusercontent.com/nicedreamzapp/moonstone/main/install.ps1 | iex
+```
+
+Uninstall (keeps your folder, config and history unless you add `-Purge`): `powershell -ExecutionPolicy Bypass -File $HOME\moonstone\uninstall.ps1`
+
 Want to look around first? `node tools/demo-server.js` serves the real UI on http://localhost:8890 with made-up sessions. That is what the screenshots here were taken from.
 
 ### Linking machines

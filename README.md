@@ -12,7 +12,7 @@
 ![Dependencies](https://img.shields.io/badge/npm%20dependencies-0-5aa2ff.svg)
 [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/nicedreamzapp/moonstone?label=OpenSSF%20Scorecard)](https://scorecard.dev/viewer/?uri=github.com/nicedreamzapp/moonstone)
 
-[Website](https://nicedreamzapp.github.io/moonstone/) · [Quick start](#quick-start) · [Configuration](#configuration) · [Security](#security-model)
+[Website](https://nicedreamzapp.github.io/moonstone/) · [Where it's going](#where-its-going) · [Quick start](#quick-start) · [Configuration](#configuration) · [Security](#security-model)
 
 <a href="https://www.youtube.com/watch?v=EuB1J7-q_CU"><img src="docs/img/video-thumb.jpg" width="640" alt="Watch the 30 second Moonstone video on YouTube"></a>
 
@@ -37,6 +37,43 @@
 
 <img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s01-rule.svg" width="100%" alt="">
 
+
+<a id="where-its-going"></a>
+
+## 🌙 Where Moonstone is going
+
+Moonstone started as one window for every Claude Code session. It is turning into something bigger: **your own HQ in your pocket.** That means the same control we have over the AI that runs our shop, on a phone anyone can afford, building the small programs that fit your life. This part moves every week, so read it as a direction, not a spec.
+
+🗣️ **Think it, say it, it's done** · The goal is ambient computing. You talk, the work runs on whichever machine suits it best, and the answer comes back out loud. Screens and typing become optional.
+
+🏠 **Your HQ in your pocket** · Moonstone for iPhone runs its engine on the phone itself, with no terminal anywhere. It has four parts. **Talk** answers the Action button and Siri. **Act** handles mail, calendar, messages and photos, and uses your home computer as extra muscle when you have one. **Build** writes a small program, runs it in a sandbox and saves it as a tool you can call by name. **Yours** means local first and open source. Its first fully offline test passed in the iPhone simulator on October 30, 2026.
+
+🧠 **Any brain, picked for the job** · Claude, local models on your own GPU, Grok and free hosted models already sit in one list. Next comes an auto picker that sends each request to the smallest model that can do it well. It picks a local model when that model fits in the memory that is free right now, and saves the big cloud models for the hard jobs. Every pick comes with a one-line reason and a one-tap override, and the picker learns from your overrides. You keep the final say, and you save money and energy on every job.
+
+📱 **Every device becomes yours** · A phone, a TV or a spare old iPhone becomes part of your own computer once Moonstone can drive it. The iPhone already sits beside the Macs and the PC on the All screen. Next is a twin phone: an older iPhone that does the task when you ask from your main one.
+
+🔭 **Built for the model that's coming** · The brain doesn't have to be a giant cloud model. Something as smart as today's best will run as a small model on a phone within a few years, and Moonstone is being built for that day. It's meant for regular people with small computers, not only people with a rack of GPUs.
+
+🧩 **The departments** · Moonstone grows from several angles at once, and each one is live or underway:
+- **Every machine:** the All screen covers every machine.
+- **Voice:** push to talk with spoken answers.
+- **Answers:** tap buttons for answers, with typing always winning.
+- **Jobs:** live cards with an ETA for every background job.
+- **Limits:** keep-going when Claude hits its limit, plus a fresh-chat handoff.
+- **Models:** local and hosted models side by side.
+- **Phone:** guarded control of the phone itself.
+
+🔗 **One family** · Moonstone is the control room for a set of local-first tools:
+- [claude-code-local](https://github.com/nicedreamzapp/claude-code-local): the brain on your own machine.
+- [NarrateClaude](https://github.com/nicedreamzapp/NarrateClaude): ears and a voice.
+- [browser-agent](https://github.com/nicedreamzapp/browser-agent) and [browser-broker](https://github.com/nicedreamzapp/browser-broker): hands in your real browser.
+- [FiaOS](https://github.com/nicedreamzapp/FiaOS): any of your machines from a browser tab.
+- [claude-screen-to-phone](https://github.com/nicedreamzapp/claude-screen-to-phone): your sessions over iMessage.
+- [claude-failover](https://github.com/nicedreamzapp/claude-failover): keeps the work going when Claude runs out.
+
+🛡️ **Depend on no one** · If we can build a piece on open parts with our own keys and our own machines, we build it. Every outside piece we still use is named, with a plan to replace it.
+
+<img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s01-rule.svg" width="100%" alt="">
 
 <a id="sessions"></a>
 <picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s02-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s02-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/moonstone/5c77882590db9d36e33f75775f3816a4e3b4aaf5/assets/readme/s02-banner.svg" width="100%" alt="02. Every session, every machine, one list. Grouped by machine, sorted by what needs you"></picture>

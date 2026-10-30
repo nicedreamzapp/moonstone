@@ -1631,29 +1631,40 @@ for (const peer of CONFIG.peers) {
 // Claude plan usage for the bar at the top (10/5): 5-hour and weekly percent + reset times, the same
 // numbers claude.ai/settings/usage shows. A Mac reads it with ~/Scripts/claude-usage/usage.py (Claude Code's
 // own keychain login); a machine without it asks its peers. Cached a minute.
-let usageCache = { at: 0, body: null };
-async function claudeUsage(fromPeer) {
-  if (usageCache.body && Date.now() - usageCache.at < 60000) return usageCache.body;
+let usageCache = { at: 0, body: null, checked: 0 };
+// 10/30: the usage endpoint answers 429 (Retry-After up to an hour) when it is asked every minute and retried right away.
+// So the API is called at most every 3 minutes, a refusal is waited out (Retry-After, or 15 min), peers fill the gaps,
+// and every reading keeps the time it was really taken, so an old number is never passed off as a fresh one.
+const USAGE_API_EVERY = 3 * 60e3; let usageApiNext = 0, usageBusy = null;
+function claudeUsage(fromPeer) { return usageBusy || (usageBusy = claudeUsageRead(fromPeer).finally(() => { usageBusy = null; })); }
+async function claudeUsageRead(fromPeer) {
+  if (usageCache.body && Date.now() - usageCache.checked < 55000) return usageCache.body;
   const sc = path.join(HOME, "Scripts", "claude-usage", "usage.py");
-  let body = null;
-  if (!WIN && fs.existsSync(sc)) body = await new Promise(ok => execFile("/usr/bin/python3", [sc], { timeout: 15000 }, (e, out) => {
-    try { const j = JSON.parse(out); ok(j.five_hour ? { five: j.five_hour, week: j.seven_day, limits: j.limits || [], at: Date.now() } : null); } catch { ok(null); } }));
-  // the PC (no python, no keychain): Claude Code keeps its login in ~/.claude/.credentials.json there
-  const cred = path.join(HOME, ".claude", ".credentials.json");
-  if (!body && fs.existsSync(cred)) body = await new Promise(ok => {
-    let tok; try { tok = JSON.parse(fs.readFileSync(cred, "utf8")).claudeAiOauth.accessToken; } catch { return ok(null); }
-    const r = require("https").get("https://api.anthropic.com/api/oauth/usage", { timeout: 10000,
-      headers: { Authorization: "Bearer " + tok, "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code" } }, x => {
-      let t = ""; x.on("data", c => (t += c)); x.on("end", () => { try { const j = JSON.parse(t); ok(j.five_hour ? { five: j.five_hour, week: j.seven_day, limits: j.limits || [], at: Date.now() } : null); } catch { ok(null); } }); });
-    r.on("error", () => ok(null)); r.on("timeout", () => { r.destroy(); ok(null); });
-  });
+  let body = null, wait = 0;
+  const toBody = j => j && j.five_hour ? { five: j.five_hour, week: j.seven_day, limits: j.limits || [], at: Date.now() } : null;
+  if (Date.now() >= usageApiNext) {
+    if (!WIN && fs.existsSync(sc)) body = await new Promise(ok => execFile("/usr/bin/python3", [sc], { timeout: 15000 }, (e, out) => {
+      try { ok(toBody(JSON.parse(out))); } catch { ok(null); } }));
+    // the PC (no python, no keychain): Claude Code keeps its login in ~/.claude/.credentials.json there
+    const cred = path.join(HOME, ".claude", ".credentials.json");
+    if (!body && fs.existsSync(cred)) body = await new Promise(ok => {
+      let tok; try { tok = JSON.parse(fs.readFileSync(cred, "utf8")).claudeAiOauth.accessToken; } catch { return ok(null); }
+      const r = require("https").get("https://api.anthropic.com/api/oauth/usage", { timeout: 10000,
+        headers: { Authorization: "Bearer " + tok, "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code" } }, x => {
+        if (x.statusCode === 429) wait = (+x.headers["retry-after"] || 0) * 1000;
+        let t = ""; x.on("data", c => (t += c)); x.on("end", () => { try { ok(toBody(JSON.parse(t))); } catch { ok(null); } }); });
+      r.on("error", () => ok(null)); r.on("timeout", () => { r.destroy(); ok(null); });
+    });
+    usageApiNext = Date.now() + (body ? USAGE_API_EVERY : Math.max(wait, 15 * 60e3));
+  }
   if (!body && !fromPeer) for (const p of CONFIG.peers) {
     if (!p.url) continue;
     const t = await getJSON(p.url + "/api/usage?peer=1", 8000);
-    try { const j = JSON.parse(t); if (j.five) { body = j; break; } } catch {}
+    try { const j = JSON.parse(t); if (j.five && j.at && (!body || j.at > body.at)) body = j; } catch {}
   }
-  if (body) usageCache = { at: Date.now(), body };
-  return body || usageCache.body;
+  if (body && (!usageCache.body || body.at >= (usageCache.body.at || 0))) usageCache.body = body;
+  usageCache.checked = Date.now();
+  return usageCache.body;
 }
 // every machine's sessions and launchers in one list, with the best machine marked per launcher
 async function buildState() {

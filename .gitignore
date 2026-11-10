@@ -15,3 +15,10 @@ update.hold
 .server.next.js
 *.bak*
 *.prev
+account-emails.json
+api-balance.json
+hold.json
+gov-scores.json
+cloud-ready.json
+free-check.json
+phone/

@@ -6,6 +6,7 @@
     { "id": "m2", "name": "M2", "url": "http://127.0.0.1:18899", "color": "#2ee6d2" },
     { "id": "pc", "name": "PC", "url": "http://127.0.0.1:18898", "color": "#ffb547" }
   ],
+  "accounts": [{ "label": "work", "plan": "Max" }, { "label": "personal", "plan": "Pro" }],
   "warm": ["Claude Code"],
   "launchers": [
     { "label": "Claude Code", "group": "main", "cwd": "~", "mode": "default" },
@@ -34,7 +35,13 @@
   "fresh": { "pct": 25 },
   "done": { "idleMinutes": 60, "keepDays": 7, "autoClose": false },
   "localIdleMinutes": 15,
-  "freeze": { "warn": 30000, "stop": 90000, "tool": 240000 },
+  "freeze": { "warn": 30000, "stop": 180000, "tool": 300000, "retry": 150000, "hard": 480000 },
   "chatMail": { "repliesOnly": false },
+  "apiBalance": null,
+  "guest": null,
+  "localOne": null,
+  "stallwatch": null,
+  "freeBuild": null,
+  "auto": { "on": false },
   "autoupdate": { "branch": "main", "restart": ["launchctl", "kickstart", "-k", "gui/501/com.example.moonstone"] }
 }

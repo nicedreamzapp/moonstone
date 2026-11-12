@@ -10,6 +10,12 @@ const MAIN = { machine: "main", freeGB: 70, forge: { budgetGB: 80 }, loaded: [],
 const NOLO = { ...MAIN, localOne: null };
 const P = (text, st = MAIN, extra = {}) => pick({ text, ...extra }, st, rules);
 
+// speed: a slow local model loses quick questions to a fast free one; fast again = back on top
+ok("slow shared local -> fast free cloud", P("how many files are in the rules folder", { ...MAIN, medSecs: { "local-shared": 322 } }).model, "nemotron-vl");
+ok("fast shared local -> local", P("how many files are in the rules folder", { ...MAIN, medSecs: { "local-shared": 20 } }).model, "local-shared");
+ok("slow local, no free cloud -> still local", P("how many files are in the rules folder", { ...MAIN, medSecs: { "local-shared": 322 }, out: ["openrouter", "gemini", "nvidia"] }).model, "local-shared");
+ok("a free model failing its check is skipped", P("how many files are in the rules folder", { ...MAIN, medSecs: { "local-shared": 322 }, freeOk: { "nemotron-vl": false } }).model !== "nemotron-vl", true);
+
 // local first, Claude for outward work, photos and hard-build plans
 ok("quick question -> the shared local model", P("what time is it in Tokyo").model, "local-shared");
 ok("...and its flow is local", P("what time is it in Tokyo").flow, "local");

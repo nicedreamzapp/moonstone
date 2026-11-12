@@ -223,6 +223,8 @@
     "\\.\\.\\.$|…$"
   ],
   "firstTokenSecs": 10,
+  "slowSecs": 20,
+  "slowAnswerSecs": 60,
   "stallSecs": 45,
   "maxSecs": 90
 }

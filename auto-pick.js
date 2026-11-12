@@ -79,6 +79,7 @@ function freeGB(state) {
 
 // every model that could take this job on this machine right now, with the reason it fits
 function eligible(job, state, rules) {
+  const med = state.medSecs || {}, isSlow = id => med[id] > (rules.slowAnswerSecs || 60);
   const machine = state.machine, loaded = new Set(state.loaded || []), out = new Set(state.out || []);
   const have = state.launchers ? new Set(state.launchers) : null, free = freeGB(state), head = rules.memHeadroomGB ?? 4;
   const res = [];
@@ -88,20 +89,20 @@ function eligible(job, state, rules) {
     if (m.where === "shared") {   // the ONE shared local model, reachable from every machine 
       const lo = state.localOne;
       if (!lo || !lo.up || lo.parked || lo.loading) continue;
-      res.push({ m: { ...m, title: lo.title ? lo.title + (lo.precision ? " " + lo.precision : "") + " (shared)" : m.title }, loaded: true });
+      res.push({ m: { ...m, title: lo.title ? lo.title + (lo.precision ? " " + lo.precision : "") + " (shared)" : m.title }, loaded: true, slow: isSlow(m.id) });
       continue;
     }
     if (m.where === "local") {
       if (!(m.machines || []).includes(machine)) continue;
       const gb = (m.gb || {})[machine];
-      if (loaded.has(m.id)) { res.push({ m, loaded: true }); continue; }
+      if (loaded.has(m.id)) { res.push({ m, loaded: true, slow: isSlow(m.id) }); continue; }
       if (gb == null || free == null || gb + head > free) continue;
       res.push({ m, loaded: false, gb });
     } else if (m.where === "cloud") {
       // `needs` = the launcher that proves this machine has the key (Nemotron rides the OpenRouter key, no button of its own)
       if (out.has(m.provider) || (have && !have.has(m.needs || m.label))) continue;
       if (state.freeOk && state.freeOk[m.id] === false) continue;   // its last real tool call failed (free-check.json)
-      res.push({ m });
+      res.push({ m, slow: isSlow(m.id) });
     } else if (m.where === "claude") {
       const acct = claudeAccount(state, rules);
       if (!acct) continue;
@@ -128,7 +129,9 @@ function score(c) {
   const cost = (c.m.cost || 0) + (c.m.where === "claude" && c.acct && !c.acct.nocap ? c.acct.five / 200 : 0);
   const energy = c.m.where === "local" && !c.loaded ? 0.1 : 0;
   const own = c.m.where === "local" || c.m.where === "shared" ? 0.15 : 0;   // local first
-  return q - cost - energy + own;
+  // a model whose real Auto answers take over slowAnswerSecs (median, last 7 days) loses to a fast one; fast again = back on top
+  const slow = c.slow ? 0.4 : 0;
+  return q - cost - energy + own - slow;
 }
 
 function costNote(c, rules) {
@@ -151,7 +154,7 @@ function override(text, rules) {
 // flow: "claude" (the chat's own Claude), "local" / "free" (runs on that model here), "plan" (Claude plans, `model` does the steps),
 //       "ci" (a "/ci " message: Claude writes the code, compile/test/upload goes through free-build)
 // state: { machine, freeGB, forge: {budgetGB}, loaded, out: [providers], launchers, accounts, localOne: {up,title,precision},
-//          freeOk: {model id: bool} }
+//          freeOk: {model id: bool}, medSecs: {model id: median seconds of finished Auto answers} }
 function pick(req, state, rules) {
   const sg = signals(req, rules);
   let job = classify(sg, rules);

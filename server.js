@@ -1329,9 +1329,22 @@ async function autoRefresh() {
   const out = autoRules.models.filter(m => m.provider && provOut(m.provider)).map(m => m.provider);
   await localOneRefresh().catch(() => {});
   let freeOk = null; try { const fc = JSON.parse(fs.readFileSync(path.join(__dirname, "free-check.json"), "utf8")).models || {};
-    freeOk = {}; for (const [id, v] of Object.entries(fc)) freeOk[id] = !!v.ok; } catch {}
+    // a free model is skipped when the 6-hourly check timed it past slowSecs (20s), or when its last 2 real Auto runs in the
+    // last 6 hours both failed (no tokens, ran out of time, refused)
+    freeOk = {}; for (const [id, v] of Object.entries(fc)) freeOk[id] = !!v.ok && !(+v.secs > ((autoRules && autoRules.slowSecs) || 20)); } catch {}
+  try { const since = Date.now() - 6 * 3600e3, runs = {};
+    for (const l of fs.readFileSync(AUTO_LOG, "utf8").split("\n").slice(-400)) { if (!l.includes('"ran"')) continue;
+      try { const r = JSON.parse(l); if (Date.parse(r.at) > since && r.flow === "free") (runs[r.ran] = runs[r.ran] || []).push(r.ok); } catch {} }
+    for (const [id, oks] of Object.entries(runs)) if (oks.length >= 2 && !oks[oks.length - 1] && !oks[oks.length - 2]) (freeOk = freeOk || {})[id] = false;
+  } catch {}
+  // median seconds of each model's finished Auto answers, last 7 days (3+ answers), so a slow model stops winning
+  let medSecs = {}; try { const since = Date.now() - 7 * 86400e3, d = {};
+    for (const l of fs.readFileSync(AUTO_LOG, "utf8").split("\n").slice(-2000)) { if (!l.includes('"ran"')) continue;
+      try { const r = JSON.parse(l); if (r.ok && r.secs != null && Date.parse(r.at) > since) (d[r.ran] = d[r.ran] || []).push(r.secs); } catch {} }
+    for (const [id, v] of Object.entries(d)) if (v.length >= 3) { v.sort((a, b) => a - b); medSecs[id] = v[v.length >> 1]; }
+  } catch {}
   const appleFm = await appleFmLive();
-  autoState = { machine: CONFIG.machine || "local", appleFm, freeGB: mem ? Math.round((mem.total - mem.used) / GB * 10) / 10 : null, localOne, freeOk,
+  autoState = { machine: CONFIG.machine || "local", appleFm, freeGB: mem ? Math.round((mem.total - mem.used) / GB * 10) / 10 : null, localOne, freeOk, medSecs,
     forge: null, loaded: [...loaded], out,
     launchers: launchers.map(l => l.label), accounts: Object.keys(ACCOUNTS).map(n => { const a = acctState(n); return { ...a, key: a.key }; }), at: Date.now() };
 }
@@ -1457,6 +1470,7 @@ function autoRunAgent(s, entry, prompt, id) {
     let gotTok = false, slowStart = false;
     const first = mdl && mdl.where === "cloud" ? setTimeout(() => { if (!gotTok) { slowStart = true; kill(); } }, firstMs) : null;
     child.stdout.on("data", c => { heard = Date.now(); const raw = String(c); if (!gotTok && (/tok=[1-9]/.test(raw) || raw.replace(ANSI, "").trim())) gotTok = true;
+      const tk = raw.match(/tok=(\d+)/g); if (tk) entry.tok = +tk[tk.length - 1].slice(4);   // the real live count for the page
       out += raw.replace(ANSI, ""); entry.answer = base + out.replace(/^\s+/, "");
       if (Date.now() - last > 400) { last = Date.now(); broadcast(s.id); } });
     child.stderr.on("data", () => {});
@@ -1554,7 +1568,9 @@ function autoSplice(s, turns) {
   if (!s.autoLog || !s.autoLog.length) return turns;
   const run = autoRuns.get(s.id);
   const q = s.autoLog.map(t => ({ user: t.user, answer: t.answer || null, work: [], auto2: true, auto: t.auto, at: t.at,
-    open: !!run && run.entry === t, secs: t.end ? Math.round((t.end - t.ts) / 1000) : null, tok: 0 }));
+    open: !!run && run.entry === t, secs: t.end ? Math.round((t.end - t.ts) / 1000) : null, tok: t.tok || 0,
+    // wait = no token yet, flow = tokens coming, ok = answered, handoff = Claude took it
+    health: run && run.entry === t ? (t.tok > 0 || (t.answer || "").trim() ? "flow" : "wait") : t.escalated ? "handoff" : "ok", why: t.escalated || "" }));
   const out = []; let ti = 0;
   for (const t of turns) { if (!t.fallback) { while (q.length && q[0].at <= ti) out.push(q.shift()); ti++; } out.push(t); }
   out.push(...q); out.forEach((t, i) => { t.i = i; });

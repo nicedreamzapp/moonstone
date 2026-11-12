@@ -425,6 +425,10 @@ body.has-usage .app{height:calc((100dvh - var(--uh) - 1px - var(--kb,0px)) / 1.2
 .attrow .th button{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:13px;line-height:20px;padding:0}
 .u.queued{opacity:.8}
 .u .qtag{display:block;margin-top:3px;font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);text-align:right}
+.adot{display:inline-block;width:7px;height:7px;border-radius:50%;margin:0 4px 0 6px;flex-shrink:0;vertical-align:middle;background:#5bd88a;box-shadow:0 0 6px #5bd88a88}
+.adot.wait{background:#f5b84b;box-shadow:0 0 6px #f5b84b88;animation:adotp 1s ease-in-out infinite}
+.adot.handoff{background:#ff6b6b;box-shadow:0 0 6px #ff6b6b88}
+@keyframes adotp{50%{opacity:.35}}
 .autopick{align-self:flex-end;max-width:88%;margin-top:-4px;padding:2px 9px;border-radius:999px;font-size:11px;line-height:1.5;color:rgba(255,255,255,.55);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);overflow-wrap:anywhere}
 .u.chatmsg{align-self:flex-start;background:rgba(40,46,80,.55);border-style:dashed;font-size:13px;opacity:.92}
 .u img.uimg{display:block;max-width:220px;max-height:260px;border-radius:10px;margin:4px 0;cursor:zoom-in}
@@ -1287,6 +1291,10 @@ function jobEta(j){
   const fin = new Date((now + left)*1000).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
   return `~${f(left)} left · done ${fin}${rev}`;
 }
+// an Auto turn shows which model ran it and a light: amber = waiting for its first token, green = tokens coming
+// or answered, red = it stalled and Claude took over
+function autoDot(t){ if(!t || !t.auto2 || !t.health) return ""; const L = {wait:"waiting for the first token", flow:"tokens coming", ok:"answered", handoff:"didn't answer in time, Claude took over"+(t.why?" ("+t.why+")":"")};
+  return `<span class="adot ${t.health}" title="${esc(L[t.health]||"")}"></span>`; }
 function mdlPill(m){ if(!m) return ""; m = String(m); const fam = /^(opus|sonnet|haiku|fable)$/i.test(m) ? m.toLowerCase() : "";
   return `<span class="mdl ${fam}" title="Model: ${esc(m)}">${esc(fam ? fam[0].toUpperCase()+fam.slice(1) : m)}</span>`; }
 // 10/25 (The user 10/21: "indicate the model when they are working so I can see"): the model doing this turn's work
@@ -1559,9 +1567,9 @@ function renderConvo(keepScroll){
       // 10/5: show what it has written so far (Claude's lines between tools, a local model's streaming text);
       // the finished answer replaces it when the turn closes
       const sofar = (t.work||[]).filter(w=>w.k==="text"&&w.text.trim()).map(w=>w.text).concat(t.answer?[t.answer]:[]);
-      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…${(()=>{ const est = (d.local || t.auto2) && !(d.liveTok || t.tok);   /* 11/04: Auto runs have no Claude count */ const n = est ? Math.round(sofar.join("").length/4) : (d.liveTok ?? t.tok ?? 0); const k = openId+":"+i; openSince[k] ??= Date.now(); return `<span class="tok">${est?"~":""}${n.toLocaleString()} tokens</span><span class="secs" data-since="${openSince[k]}">${Math.round((Date.now()-openSince[k])/1000)}s</span>${d.quiet?`<span class="quiet" data-at="${Date.now()-d.quiet.ms}" data-warn="${d.quiet.warn}"${d.quiet.note?` data-note="${esc(d.quiet.note)}"`:""}>${quietTxt(Date.now()-d.quiet.ms, d.quiet.warn, d.quiet.note)}</span>`:""}${mdlPill(t.auto2 && t.auto ? t.auto.title : workModel(d))}`; })()}</div>${workHtml(t)}</div>`;
+      h += `<div>${sofar.length?`<div class="a sofar">${sofar.map(x=>md(x)).join("")}</div>`:""}<div class="live"><span class="dot"></span>Working…${(()=>{ const est = (d.local || t.auto2) && !(d.liveTok || t.tok);   /* 11/04: Auto runs have no Claude count */ const n = est ? Math.round(sofar.join("").length/4) : (d.liveTok ?? t.tok ?? 0); const k = openId+":"+i; openSince[k] ??= Date.now(); return `<span class="tok">${est?"~":""}${n.toLocaleString()} tokens</span><span class="secs" data-since="${openSince[k]}">${Math.round((Date.now()-openSince[k])/1000)}s</span>${d.quiet?`<span class="quiet" data-at="${Date.now()-d.quiet.ms}" data-warn="${d.quiet.warn}"${d.quiet.note?` data-note="${esc(d.quiet.note)}"`:""}>${quietTxt(Date.now()-d.quiet.ms, d.quiet.warn, d.quiet.note)}</span>`:""}${mdlPill(t.auto2 && t.auto ? t.auto.title : workModel(d))}${autoDot(t)}`; })()}</div>${workHtml(t)}</div>`;
     } else if(t.answer || t.hasWork || t.work?.length){
-      h += `<div class="a">${t.answer?(i===lastAnsIdx(d) && !d.busy && !d.perm ? answerHtml(d, t.answer) : md(t.answer)):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}${(t.answer||t.tok)?`<div class="acts">${t.answer?`<button class="cpy" data-copy="${t.i}" title="Copy this answer" aria-label="Copy this answer">${COPY_SVG}</button>`:""}${t.tok?`<span class="atok">${t.tok.toLocaleString()} tokens</span>`:""}${t.auto2&&t.auto&&t.answer?`<span class="atok">~${Math.round(t.answer.length/4).toLocaleString()} tokens</span>${mdlPill(t.auto.title)}`:""}</div>`:""}</div>`;
+      h += `<div class="a">${t.answer?(i===lastAnsIdx(d) && !d.busy && !d.perm ? answerHtml(d, t.answer) : md(t.answer)):`<span style="color:var(--faint)">(no written answer)</span>`}${workHtml(t)}${(t.answer||t.tok)?`<div class="acts">${t.answer?`<button class="cpy" data-copy="${t.i}" title="Copy this answer" aria-label="Copy this answer">${COPY_SVG}</button>`:""}${t.tok?`<span class="atok">${t.tok.toLocaleString()} tokens</span>`:""}${t.auto2&&t.auto&&t.answer?`<span class="atok">~${Math.round(t.answer.length/4).toLocaleString()} tokens</span>${mdlPill(t.auto.title)}${autoDot(t)}`:""}</div>`:""}</div>`;
     }
     if(t.banner) h += `<button class="fbback" data-fbback="1" title="Stop the free model and send your next message to Claude">Back to Claude</button>`;
     return `<div class="ti" data-ti="${t.i}" style="display:contents">${h}</div>`;   // topics scroll to their turn

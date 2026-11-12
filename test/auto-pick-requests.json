@@ -1,0 +1,135 @@
+{
+  "note": "Twenty sample requests of the kind sent in chats (typos fixed, nothing private). expect is the flow Auto should choose: cheap = local or free model, plan = Claude plans and a local model does it, claude = Claude takes the turn. Local first for follow-ups, routine and bulk work and simple or medium fixes; Claude for outward writing, photos and builds.",
+  "state": {
+    "machine": "main",
+    "freeGB": 70,
+    "forge": {
+      "budgetGB": 80
+    },
+    "loaded": [],
+    "out": [],
+    "accounts": [
+      {
+        "n": 1,
+        "five": 30,
+        "week": 40
+      },
+      {
+        "n": 2,
+        "five": 12,
+        "week": 30
+      }
+    ]
+  },
+  "requests": [
+    {
+      "text": "Push the parser fixes first",
+      "expect": "cheap",
+      "was": "T4",
+      "why": "simple or medium fix / routine work: local first"
+    },
+    {
+      "text": "Start whisper.cpp",
+      "expect": "cheap"
+    },
+    {
+      "text": "Send it to my phone. It's really hard on this laptop, the images look so small, but I think I'll be able to see it on my phone better",
+      "expect": "cheap"
+    },
+    {
+      "text": "1 service on the vps down",
+      "expect": "claude",
+      "was": "cheap",
+      "why": "build, fix or design work: Claude does it"
+    },
+    {
+      "text": "what were the results of the test bench?",
+      "expect": "cheap"
+    },
+    {
+      "text": "Pull up the brochure it made with the bragging marketing stuff. Did it make that? Let me see it in a tab",
+      "expect": "cheap"
+    },
+    {
+      "text": "What automation is running on my phone? Can you please stop it",
+      "expect": "cheap"
+    },
+    {
+      "text": "the guy looks strange and not perfect, the form of the man on the soccer game looks like his arms are deformed or crossed, on the shooting game the way he holds the gun looks weird, and the music from the video made me want to die",
+      "expect": "claude",
+      "was": "cheap",
+      "why": "build, fix or design work: Claude does it"
+    },
+    {
+      "text": "https://example.com/play/keeper.html when I was playing this game, my feet weren't moving when I was trying to kick as the goalie, it wasn't smooth, it wasn't following my movement",
+      "expect": "claude",
+      "was": "cheap",
+      "why": "build, fix or design work: Claude does it"
+    },
+    {
+      "text": "We just made a Facebook post and I wanna make a LinkedIn post announcing the podcast",
+      "expect": "claude",
+      "was": "T5",
+      "why": "his voice in public"
+    },
+    {
+      "text": "does meta offer the free 1000? does nvidia directly or only through open router?",
+      "expect": "cheap"
+    },
+    {
+      "text": "if it crashes like this we need a special tool to bring it back when it restarts",
+      "expect": "claude",
+      "was": "plan",
+      "why": "build, fix or design work: Claude does it"
+    },
+    {
+      "text": "Looking at my GitHub, is there anything that you think we should work on",
+      "expect": "claude",
+      "was": "plan",
+      "why": "build, fix or design work: Claude does it"
+    },
+    {
+      "text": "Make a new track",
+      "expect": "cheap",
+      "was": "T4",
+      "why": "simple or medium fix / routine work: local first"
+    },
+    {
+      "text": "Try tiny model on Cricket",
+      "expect": "cheap",
+      "was": "T4",
+      "why": "simple or medium fix / routine work: local first"
+    },
+    {
+      "text": "[attached file: /uploads/20261029-brown.png] we need to pick a new brown that matches our old one",
+      "expect": "claude",
+      "was": "cheap",
+      "why": "photo: the local model and freebridge are text-only, so Claude sees it"
+    },
+    {
+      "text": "calc.py has a bug: add() subtracts. Fix it with the Edit tool so add returns a + b.",
+      "expect": "claude",
+      "was": "cheap",
+      "why": "build, fix or design work: Claude does it"
+    },
+    {
+      "text": "Use the Read tool to open badge.png (an image). What shape and color is on the left, and what text is on the right?",
+      "expect": "claude",
+      "was": "cheap",
+      "why": "photo: the local model and freebridge are text-only, so Claude sees it"
+    },
+    {
+      "text": "I want to continue cleaning up this laptop. I want to go through the Downloads folder",
+      "expect": "cheap",
+      "was": "T4",
+      "why": "simple or medium fix / routine work: local first"
+    },
+    {
+      "text": "[attached file: /uploads/20261029-021412-image.png] it does not look completely flat so not sure but yes it's coming together better",
+      "lastTier": "T5",
+      "expect": "claude",
+      "was": "T5",
+      "why": "photo: the local model and freebridge are text-only, so Claude sees it"
+    }
+  ]
+}

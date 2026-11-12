@@ -42,6 +42,6 @@
   "localOne": null,
   "stallwatch": null,
   "freeBuild": null,
-  "auto": { "on": false },
+  "auto": { "on": false, "agent": { "python": "/usr/bin/python3", "script": "~/path/to/your/agent.py" }, "backends": { "nemotron-vl": ["openrouter", "nvidia/nemotron-3.5-super-vl:free", 128000] } },
   "autoupdate": { "branch": "main", "restart": ["launchctl", "kickstart", "-k", "gui/501/com.example.moonstone"] }
 }

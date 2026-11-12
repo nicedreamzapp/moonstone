@@ -1277,8 +1277,8 @@ async function localOneRefresh() {
     r.on("error", () => ok(null)); r.on("timeout", () => { r.destroy(); ok(null); }); });
 }
 // ---------- Auto model picker (experimental, off unless config "auto": {"on": true}) ----------
-// It needs a picker module (auto-pick.js) and a rules file (auto-rules.json) next to server.js; neither is part of this
-// repo, because the rules are tuned to one person's machines and models. Without them, or with "auto" off, none of this runs.
+// It needs the picker module (auto-pick.js) and the rules file (auto-rules.json) next to server.js. Without them, or with
+// "auto" off, none of this runs. Edit auto-rules.json to match your own machines and models.
 // The user 10/30: Moonstone should pick the best model per job (local for simple/visual, cloud for complex builds), with
 // him always the final say. Milestone 1 only WATCHES: every new message gets "Auto would pick: X · why" under it and a
 // line in ~/.moonstone/auto-choices.jsonl next to the model he really used. Nothing here changes which model runs.
@@ -1448,13 +1448,22 @@ function autoRunAgent(s, entry, prompt, id) {
     let out = "", last = 0, timedOut = false, stalled = false, heard = Date.now();
     const base = entry.answer, stallMs = ((autoRules && autoRules.stallSecs) || 120) * 1e3, maxMs = ((autoRules && autoRules.maxSecs) || 360) * 1e3;
     const kill = () => { try { process.kill(-child.pid, "SIGTERM"); } catch { try { child.kill(); } catch {} } };
-    child.stdout.on("data", c => { heard = Date.now(); out += String(c).replace(ANSI, ""); entry.answer = base + out.replace(/^\s+/, "");
+    // A free cloud model with no token (the agent's tok= count or any answer text) in firstTokenSecs is killed and Claude takes
+    // the turn. The wait is 10s, or longer for a model whose last 6-hourly timing (free-check.json secs) was slower:
+    // 1.5x that + 3s, never past 25s.
+    let fcSecs = 0; try { fcSecs = +((JSON.parse(fs.readFileSync(path.join(__dirname, "free-check.json"), "utf8")).models || {})[id] || {}).secs || 0; } catch {}
+    const mdl = ((autoRules && autoRules.models) || []).find(m => m.id === id),
+      firstMs = Math.min(25, Math.max((autoRules && autoRules.firstTokenSecs) || 10, fcSecs * 1.5 + 3)) * 1e3;
+    let gotTok = false, slowStart = false;
+    const first = mdl && mdl.where === "cloud" ? setTimeout(() => { if (!gotTok) { slowStart = true; kill(); } }, firstMs) : null;
+    child.stdout.on("data", c => { heard = Date.now(); const raw = String(c); if (!gotTok && (/tok=[1-9]/.test(raw) || raw.replace(ANSI, "").trim())) gotTok = true;
+      out += raw.replace(ANSI, ""); entry.answer = base + out.replace(/^\s+/, "");
       if (Date.now() - last > 400) { last = Date.now(); broadcast(s.id); } });
     child.stderr.on("data", () => {});
     const timer = setTimeout(() => { timedOut = true; kill(); }, maxMs);
     const quiet = setInterval(() => { if (Date.now() - heard > stallMs) { stalled = true; clearInterval(quiet); kill(); } }, 5e3);
-    child.on("error", e => { clearTimeout(timer); clearInterval(quiet); done({ code: 1, answer: e.message }); });
-    child.on("exit", code => { clearTimeout(timer); clearInterval(quiet); done({ code, answer: out.trim(), timedOut, stalled, stopped: !!(run && run.stopped) }); });
+    child.on("error", e => { clearTimeout(timer); clearTimeout(first); clearInterval(quiet); done({ code: 1, answer: e.message }); });
+    child.on("exit", code => { clearTimeout(timer); clearTimeout(first); clearInterval(quiet); done({ code, answer: out.trim(), timedOut, stalled, slowStart, stopped: !!(run && run.stopped) }); });
   });
 }
 async function autoRun(s, text, a) {

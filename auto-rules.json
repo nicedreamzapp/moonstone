@@ -1,0 +1,228 @@
+{
+  "version": 2,
+  "note": "Auto picker rules. Read by auto-pick.js. Plain data: edit by hand to match your own machines and models. Tiers: T1 local small, T2 local big (one shared local model), T3 free cloud, T4 Claude Sonnet, T5 Claude Opus. Local first; Claude takes outward writing, photos, hard-build plans and anything the local model fails. Never in a tier: Grok, Fable (pick it by hand), any 4-bit model. Builds and design work always go to Claude. Local and free models get maxSecs in total (stallSecs of silence) before Claude takes over. A free cloud model that shows no token within firstTokenSecs (longer for a model the 6-hourly free-check timed slower, 1.5x + 3s, max 25s) hands the turn to Claude.",
+  "tiers": {
+    "T1": "local small",
+    "T2": "local big",
+    "T3": "free cloud",
+    "T4": "Claude Sonnet",
+    "T5": "Claude Opus"
+  },
+  "models": [
+    {
+      "id": "qwen35-2b",
+      "title": "on-phone Qwen",
+      "label": "Qwen 3.5 2B",
+      "tier": "T1",
+      "where": "local",
+      "machines": [
+        "phone"
+      ],
+      "gb": {
+        "phone": 3
+      },
+      "precision": "bf16",
+      "vision": true,
+      "tools": true
+    },
+    {
+      "id": "local-shared",
+      "title": "the shared local model",
+      "label": "Local · shared",
+      "tier": "T2",
+      "where": "shared",
+      "grade": 7.5,
+      "vision": false,
+      "tools": true,
+      "why": "the one shared local model every machine reaches; it is always loaded, so it is free to use"
+    },
+    {
+      "id": "liquid-24b",
+      "title": "local Liquid",
+      "label": "Liquid LFM2.5 24B",
+      "tier": "T1",
+      "where": "local",
+      "machines": [
+        "main"
+      ],
+      "gb": {
+        "main": 48
+      },
+      "precision": "bf16",
+      "vision": false,
+      "tools": true,
+      "probe": "liquid",
+      "onDemand": true,
+      "offered": false,
+      "why": "one shared local model now (it can serve this one by a swap); Auto never starts a second local model"
+    },
+    {
+      "id": "gemma4-31b",
+      "title": "local Gemma",
+      "label": "Gemma 4",
+      "tier": "T2",
+      "where": "local",
+      "machines": [
+        "main",
+        "small"
+      ],
+      "gb": {
+        "main": 62,
+        "small": 35
+      },
+      "precision": {
+        "main": "bf16",
+        "small": "8bit"
+      },
+      "vision": true,
+      "tools": true,
+      "onDemand": true,
+      "offered": false,
+      "why": "one shared local model now (it can serve this one by a swap); Auto never starts a second local model"
+    },
+    {
+      "id": "nemotron-vl",
+      "title": "Nemotron VL (free)",
+      "label": "Nemotron 3.5 Super VL · OpenRouter",
+      "needs": "OpenRouter · best free today",
+      "tier": "T3",
+      "where": "cloud",
+      "provider": "openrouter",
+      "grade": 6.2,
+      "why": "replaced a slower free model; timed 3 of 3, first token under a second, done in 2 to 5 seconds",
+      "vision": false,
+      "tools": true
+    },
+    {
+      "id": "gemini",
+      "title": "Gemini (free)",
+      "label": "Gemini",
+      "tier": "T3",
+      "where": "cloud",
+      "provider": "gemini",
+      "grade": 5.9,
+      "vision": false,
+      "tools": true,
+      "note": "Auto runs free models through freebridge, which drops pictures, so not a vision pick"
+    },
+    {
+      "id": "openrouter",
+      "title": "OpenRouter free",
+      "label": "OpenRouter · best free today",
+      "tier": "T3",
+      "where": "cloud",
+      "provider": "openrouter",
+      "grade": 4.4,
+      "vision": false,
+      "tools": true
+    },
+    {
+      "id": "sonnet",
+      "title": "Sonnet",
+      "label": "Claude Sonnet",
+      "tier": "T4",
+      "where": "claude",
+      "grade": 8,
+      "cost": 0.4
+    },
+    {
+      "id": "opus",
+      "title": "Opus",
+      "label": "Claude Opus",
+      "tier": "T5",
+      "where": "claude",
+      "grade": 9,
+      "cost": 0.6
+    }
+  ],
+  "never": [
+    "grok",
+    "x.ai",
+    "fable",
+    "4bit",
+    "4-bit"
+  ],
+  "memHeadroomGB": 4,
+  "ctxBigTokens": 100000,
+  "claudeTightPct": 90,
+  "claudeSpentPct": 98,
+  "followUpWords": 14,
+  "signals": {
+    "outward": [
+      "\\be-?mails?\\b|\\binbox\\b",
+      "\\b(customer|buyer)s?\\b",
+      "\\b(e-?mail|reply|respond|write back)\\b.{0,40}\\b(him|her|them|customer|supplier|vendor)\\b",
+      "\\b(invoice|refund|chargeback|warranty)\\b",
+      "\\b(linkedin|reddit|facebook|twitter|tweet|x\\.com|dev\\.to|blog) post\\b",
+      "\\bpost on (linkedin|reddit|facebook|x|twitter)\\b",
+      "\\bannounc(e|ing)\\b"
+    ],
+    "build": [
+      "\\b(build|rebuild|implement|refactor|architect|redesign|design)\\b",
+      "\\b(bugs?|broken|crash(es|ed|ing)?|traceback|stack trace|exception)\\b",
+      "\\b(fix|debug)\\b",
+      "\\bnot (working|smooth|moving|following)\\b|\\b(isn't|isnt|wasn't|weren't|doesn't|won't) (working|moving|smooth|following)\\b",
+      "\\b(service|server|site|vps|dock|app)s?\\b.{0,20}\\bdown\\b",
+      "\\blooks? (strange|weird|wrong|off|deformed|broken)\\b|\\bdeformed\\b",
+      "\\b(new|special|a) (tool|app|script|feature|page|game|engine)\\b.{0,40}\\b(to|that|which|for)\\b",
+      "\\bwhat (do you think|should we) (we should )?(work on|build)\\b|\\banything (that )?you think we should work on\\b",
+      "\\bplan (it|this|the)\\b",
+      "\\b(change|update|tweak|restyle|redo|rework|improve|make)\\b.{0,40}\\b(look|style|layout|design|cards?|colou?rs?|ui|page|screen|dashboard|app|site|buttons?|fonts?|theme|carousel|home page)s?\\b",
+      "\\b(look|layout|style|theme|design) of\\b"
+    ],
+    "bulk": [
+      "\\b(all|every|each) (of )?(the )?\\w+s\\b",
+      "\\b(batch|re-?run|re-?render|render|rename|reformat|convert|clean(ing)? up|go through)\\b",
+      "\\b(push|commit|deploy|merge)\\b",
+      "\\bmake a new (track|song|video|render)\\b",
+      "\\btry (the )?\\w+( \\w+)? (model )?on\\b",
+      "\\brun (the )?(tests|bench|benchmark|eval)s?\\b"
+    ],
+    "exact": [
+      "\\bso (that )?\\w+(\\(\\))? returns?\\b",
+      "\\b(change|replace|set) \\S+ (to|with) \\S+",
+      "\\bwith the (edit|bash|read|write) tool\\b"
+    ],
+    "image": [
+      "\\[attached file: [^\\]]+\\.(png|jpe?g|heic|gif|webp)\\]",
+      "\\[image[: #]",
+      "\\.(png|jpe?g|heic|webp)\\b",
+      "\\b(photo|picture|screenshot|image)\\b"
+    ],
+    "hard": [
+      "\\b(build|implement|architect|redesign|design|rebuild|refactor)\\b.{0,60}\\b(app|system|feature|engine|pipeline|tool|service|page|game|site|dashboard|api)s?\\b",
+      "\\bfrom scratch\\b|\\bend to end\\b|\\bwhole (app|site|system)\\b|\\bmigrat(e|ion)\\b",
+      "\\b(new|special|a) (tool|app|script|feature|page|game|engine)\\b.{0,40}\\b(to|that|which|for)\\b",
+      "\\bwhat (do you think|should we) (we should )?(work on|build)\\b|\\banything (that )?you think we should work on\\b",
+      "\\bplan (it|this|the)\\b"
+    ]
+  },
+  "hardBuildWords": 45,
+  "planMaxSteps": 6,
+  "planner": "opus",
+  "override": {
+    "opus": "\\b(use|with|on|via|ask|switch to|give it to)\\s+(claude\\s+)?opus\\b",
+    "sonnet": "\\b(use|with|on|via|ask|switch to|give it to)\\s+(claude\\s+)?sonnet\\b",
+    "claude": "\\b(use|with|on|via|ask|switch to|give it to)\\s+claude\\b|\\bclaude (only|do it|should do)\\b",
+    "local": "\\b(use|with|on|via|ask|switch to|give it to)\\s+(qwen|the local model|local)\\b",
+    "nemotron-vl": "\\b(use|with|on|via|ask|switch to|give it to)\\s+nemotron\\b",
+    "gemini": "\\b(use|with|on|via|ask|switch to|give it to)\\s+gemini\\b",
+    "openrouter": "\\b(use|with|on|via|ask|switch to|give it to)\\s+openrouter\\b"
+  },
+  "failSigns": [
+    "\\bI (can(no|')t|am unable to|was unable to|couldn't|could not|wasn't able to)\\b",
+    "\\b(max(imum)? (steps|turns)|step limit|ran out of (steps|context|time))\\b",
+    "^\\s*(error|traceback)\\b",
+    "finished without writing a reply",
+    "\\bI don't have (access|the ability)\\b",
+    "too busy right now|pick another one from the menu"
+  ],
+  "unfinishedSigns": [
+    "^(now,? )?(let me|let's|i'll|i will|i'm going to|next,? i)\\b",
+    "[:,]\\s*$",
+    "\\.\\.\\.$|…$"
+  ],
+  "firstTokenSecs": 10,
+  "stallSecs": 45,
+  "maxSecs": 90
+}
